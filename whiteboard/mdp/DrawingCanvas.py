@@ -23,15 +23,20 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# Board geometry constants — must match g1.xml
+# Board geometry — imported from the single source of truth in board.py rather
+# than redefined here. These used to be a private copy that could (and did)
+# drift out of step with the ranges used by the command and reward terms.
 # ---------------------------------------------------------------------------
 
-BOARD_FACE_X: float = 0.63
-BOARD_Y_MIN: float = -0.40
-BOARD_Y_MAX: float =  0.40
-BOARD_Z_MIN: float =  0.75
-BOARD_Z_MAX: float =  1.45
-CONTACT_X_THRESHOLD: float = 0.015
+from .board import (  # noqa: E402
+    BOARD_FACE_X,
+    BOARD_Y_MAX,
+    BOARD_Y_MIN,
+    BOARD_Z_MAX,
+    BOARD_Z_MIN,
+    CONTACT_X_THRESHOLD,
+)
+
 PIXELS_PER_METRE: int = 300
 BRUSH_RADIUS_PX: int = 4
 INK_COLOUR: tuple[int, int, int] = (30, 30, 200)

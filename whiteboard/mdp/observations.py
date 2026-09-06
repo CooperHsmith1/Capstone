@@ -10,6 +10,7 @@ from mjlab.sensor import ContactSensor
 from mjlab.sensor.terrain_height_sensor import TerrainHeightSensor
 
 from .cfg_utils import resolve_first_site_id
+from .state_estimation.integration import StateEstimationCfg, get_state_estimator
 
 if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
@@ -78,3 +79,81 @@ def site_position(
     idx = resolve_first_site_id(asset_cfg)  # int — never a slice
     pos_w = asset.data.site_pos_w[:, idx, :]          # [B, 3] absolute world
     return pos_w - env.scene.env_origins             # [B, 3] env-local
+
+
+# ---------------------------------------------------------------------------
+# FILTERED STATE OBSERVATIONS
+# ---------------------------------------------------------------------------
+#
+# These terms feed the policy the *estimated* pen state rather than the exact
+# simulator value. That is the point of the whole state-estimation exercise: a
+# policy trained on ground-truth pen position learns to rely on information the
+# real G1 will never have, and the gap shows up as a sim-to-real failure. A
+# policy trained on filtered, noisy estimates learns to work with the same
+# quality of information it will get on hardware.
+#
+# The first of these terms to be evaluated on a given step creates and advances
+# the shared filter; the rest read the same cached result. See
+# ``state_estimation/integration.py`` for why the filter is driven from here.
+
+
+def estimated_pen_position(
+    env: ManagerBasedRlEnv,
+    estimator_cfg: StateEstimationCfg | None = None,
+) -> torch.Tensor:
+    """Filtered env-local pen-tip position, shape [B, 3].
+
+    Drop-in replacement for ``site_position`` on the ``pen_pos`` observation
+    term. Swapping between the two is the core sim-to-real experiment:
+    train once with each and compare transfer.
+    """
+    manager = get_state_estimator(env, estimator_cfg)
+    manager.step_if_needed()
+    return manager.estimator.position
+
+
+def estimated_pen_velocity(
+    env: ManagerBasedRlEnv,
+    estimator_cfg: StateEstimationCfg | None = None,
+) -> torch.Tensor:
+    """Filtered env-local pen-tip velocity, shape [B, 3].
+
+    Velocity is not directly measurable on hardware, so this is genuinely new
+    information rather than a smoothed copy of an existing observation -- it
+    gives the policy a lead term for free.
+    """
+    manager = get_state_estimator(env, estimator_cfg)
+    manager.step_if_needed()
+    return manager.estimator.velocity
+
+
+def pen_position_uncertainty(
+    env: ManagerBasedRlEnv,
+    estimator_cfg: StateEstimationCfg | None = None,
+) -> torch.Tensor:
+    """Per-axis position standard deviation from the filter, shape [B, 3].
+
+    Exposing uncertainty (not just the estimate) is what allows a policy to
+    learn a genuinely risk-aware behaviour -- slowing down or backing the pen
+    off the board when localisation degrades, instead of committing to a stroke
+    it cannot place. Without this the policy cannot distinguish a confident
+    estimate from a guess.
+    """
+    manager = get_state_estimator(env, estimator_cfg)
+    manager.step_if_needed()
+    return manager.estimator.position_std
+
+
+def pen_estimate_innovation(
+    env: ManagerBasedRlEnv,
+    estimator_cfg: StateEstimationCfg | None = None,
+) -> torch.Tensor:
+    """Most recent measurement residual, shape [B, 3].
+
+    Mainly a training-time diagnostic: a persistently large innovation means
+    the filter has lost the pen. Usually placed in the critic-only observation
+    group rather than given to the actor.
+    """
+    manager = get_state_estimator(env, estimator_cfg)
+    manager.step_if_needed()
+    return manager.estimator.last_innovation

@@ -1,0 +1,54 @@
+EGH490-1  Comparative State-Estimation Benchmark
+G1 whiteboard drawing task -- particle filter vs EKF vs UKF
+Generated: 2026-09-02 21:49 UTC
+Command:   python run_benchmark.py
+
+Setup: 1000 steps @ dt=0.02 s, 8 parallel envs, Lissajous pen trajectory
+       across the board face. Sensor sigma = 10 mm. All filters receive the
+       SAME nominal noise config, so any difference is algorithmic.
+       Seeds are derived deterministically (crc32), so this table is
+       reproducible run-to-run and machine-to-machine.
+
+Aggregated over 5 independent noise realisations (mean +/- std).
+
+Noise regime: gaussian
+-------------------------------------------------------------------------------------------
+Filter                              RMSE (mm)   Raw (mm)   Improve  Max err (mm)    us/step
+-------------------------------------------------------------------------------------------
+EKF                           11.72 +/-  0.07      17.35     32.5%         36.21      151.9 *
+UKF                           11.72 +/-  0.07      17.35     32.5%         36.21      310.3  
+PF-bootstrap(N=512)          372.13 +/- 379.76      17.35  -2045.0%       5299.44      945.1  
+PF-optimal(N=512)             12.18 +/-  0.07      17.35     29.8%         36.76     1438.3  
+
+Noise regime: outliers_6pct
+-------------------------------------------------------------------------------------------
+Filter                              RMSE (mm)   Raw (mm)   Improve  Max err (mm)    us/step
+-------------------------------------------------------------------------------------------
+EKF                           86.78 +/-  1.32     128.67     32.6%        756.24      152.8  
+UKF                           86.78 +/-  1.32     128.67     32.6%        756.24      310.4  
+PF-bootstrap(N=512)          845.45 +/- 562.24     128.67   -557.1%       7355.75      987.8  
+PF-optimal(N=512)             50.61 +/-  4.76     128.67     60.7%        566.26     1430.2 *
+
+Noise regime: dropout_15pct
+-------------------------------------------------------------------------------------------
+Filter                              RMSE (mm)   Raw (mm)   Improve  Max err (mm)    us/step
+-------------------------------------------------------------------------------------------
+EKF                           13.12 +/-  0.08      17.82     26.4%         57.13      154.2 *
+UKF                           13.12 +/-  0.08      17.82     26.4%         57.13      321.9  
+PF-bootstrap(N=512)          166.69 +/- 127.53      17.82   -835.5%       2190.91      971.2  
+PF-optimal(N=512)             13.55 +/-  0.08      17.82     24.0%         56.78     1448.4  
+
+Noise regime: heavy_noise
+-------------------------------------------------------------------------------------------
+Filter                              RMSE (mm)   Raw (mm)   Improve  Max err (mm)    us/step
+-------------------------------------------------------------------------------------------
+EKF                           46.33 +/-  0.17      69.01     32.9%        133.95      157.8 *
+UKF                           46.33 +/-  0.17      69.01     32.9%        133.95      313.8  
+PF-bootstrap(N=512)          613.25 +/- 394.53      69.01   -788.7%       9080.72      981.1  
+PF-optimal(N=512)             54.06 +/-  1.37      69.01     21.7%        322.96     1449.4  
+
+Interpretation:
+  'Improve' is the fraction of measurement error the filter removes.
+  A negative value means the filter is worse than the raw sensor.
+  '*' marks the lowest mean RMSE in each regime.
+  Differences smaller than the +/- spread are not real differences.

@@ -22,19 +22,20 @@ Enable estimation in training:
 
 ```python
 from mjlab.tasks.whiteboard.mdp.state_estimation import (
-    StateEstimationCfg, StateEstimatorCfg,
+  StateEstimationCfg,
+  StateEstimatorCfg,
 )
 from mjlab.tasks.whiteboard.config.g1.env_cfgs import unitree_g1_drawing_env_cfg
 
 cfg = unitree_g1_drawing_env_cfg(
-    num_envs=4096,
-    state_estimation=StateEstimationCfg(
-        filter_type="particle",      # or "ekf" / "ukf"
-        num_particles=512,
-        sensor_noise_std=0.01,       # injected sensor noise, metres
-        outlier_rate=0.02,           # dropouts/glitches
-        noise=StateEstimatorCfg(measurement_noise=0.01),
-    ),
+  num_envs=4096,
+  state_estimation=StateEstimationCfg(
+    filter_type="particle",  # or "ekf" / "ukf"
+    num_particles=512,
+    sensor_noise_std=0.01,  # injected sensor noise, metres
+    outlier_rate=0.02,  # dropouts/glitches
+    noise=StateEstimatorCfg(measurement_noise=0.01),
+  ),
 )
 ```
 
@@ -161,7 +162,7 @@ terms from scratch, overwriting them:
 
 ```python
 cfg.rewards["smooth_pen_motion"] = RewardTermCfg(weight=-0.05)  # 5× tuned value
-cfg.rewards["upright"]           = RewardTermCfg(weight=2.0)    # 2× tuned value
+cfg.rewards["upright"] = RewardTermCfg(weight=2.0)  # 2× tuned value
 ```
 
 Because that function is the one registered for training, **the tuning recorded

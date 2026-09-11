@@ -118,6 +118,8 @@ def unitree_g1_drawing_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       max_grad_norm=1.0,
     ),
     experiment_name="g1_drawing",
+    logger="tensorboard",
+    upload_model=False,
     save_interval=50,
     # Longer rollouts: the arm needs several seconds of context to learn
     # to hold the pen on the board and track a target smoothly.

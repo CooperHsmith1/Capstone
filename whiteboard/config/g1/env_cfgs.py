@@ -6,6 +6,7 @@ from mjlab.tasks.whiteboard.mdp.board import (
   BOARD_FACE_X,
   TARGET_Y_RANGE,
   TARGET_Z_RANGE,
+  WRITING_X,
 )
 from mjlab.tasks.whiteboard.mdp.draw_target_cmd import DrawTargetCommandCfg
 from mjlab.tasks.whiteboard.mdp.state_estimation import StateEstimationCfg
@@ -60,8 +61,11 @@ def unitree_g1_drawing_env_cfg(
     cfg.commands["draw_target"] = DrawTargetCommandCfg(
       resampling_time_range=(6.0, 10.0),
       board_face_x=BOARD_FACE_X,
+      writing_x=WRITING_X,
       board_y_range=TARGET_Y_RANGE,
       board_z_range=TARGET_Z_RANGE,
+      radius=0.15,
+      angular_speed=0.25,
     )
 
   return cfg

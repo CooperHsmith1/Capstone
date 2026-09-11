@@ -14,22 +14,22 @@ observation group; the filter is created and stepped automatically.
 """
 
 from .base import (
-    MEAS_DIM,
-    POS_SLICE,
-    STATE_DIM,
-    VEL_SLICE,
-    StateEstimator,
-    StateEstimatorCfg,
-    constant_velocity_transition,
-    position_measurement_matrix,
+  MEAS_DIM,
+  POS_SLICE,
+  STATE_DIM,
+  VEL_SLICE,
+  StateEstimator,
+  StateEstimatorCfg,
+  constant_velocity_transition,
+  position_measurement_matrix,
 )
 from .benchmark import (
-    BenchmarkResult,
-    corrupt,
-    evaluate,
-    format_table,
-    generate_trajectory,
-    run_benchmark,
+  BenchmarkResult,
+  corrupt,
+  evaluate,
+  format_table,
+  generate_trajectory,
+  run_benchmark,
 )
 from .kalman import ExtendedKalmanFilter, UnscentedKalmanFilter
 from .particle_filter import ParticleFilter
@@ -41,51 +41,51 @@ from .particle_filter import ParticleFilter
 # not exported and anything that needs them fails with a clear ImportError at
 # the point of use rather than at package import.
 try:
-    from .integration import (
-        FilterType,
-        StateEstimationCfg,
-        StateEstimatorManager,
-        build_estimator,
-        get_state_estimator,
-        has_state_estimator,
-        reset_state_estimator,
-    )
+  from .integration import (
+    FilterType,
+    StateEstimationCfg,
+    StateEstimatorManager,
+    build_estimator,
+    get_state_estimator,
+    has_state_estimator,
+    reset_state_estimator,
+  )
 
-    _MJLAB_AVAILABLE = True
+  _MJLAB_AVAILABLE = True
 except ImportError:  # pragma: no cover - depends on install environment
-    _MJLAB_AVAILABLE = False
+  _MJLAB_AVAILABLE = False
 
 __all__ = [
-    # Core interface
-    "StateEstimator",
-    "StateEstimatorCfg",
-    "STATE_DIM",
-    "MEAS_DIM",
-    "POS_SLICE",
-    "VEL_SLICE",
-    "constant_velocity_transition",
-    "position_measurement_matrix",
-    # Estimators
-    "ParticleFilter",
-    "ExtendedKalmanFilter",
-    "UnscentedKalmanFilter",
-    # Benchmarking
-    "BenchmarkResult",
-    "run_benchmark",
-    "evaluate",
-    "generate_trajectory",
-    "corrupt",
-    "format_table",
+  # Core interface
+  "StateEstimator",
+  "StateEstimatorCfg",
+  "STATE_DIM",
+  "MEAS_DIM",
+  "POS_SLICE",
+  "VEL_SLICE",
+  "constant_velocity_transition",
+  "position_measurement_matrix",
+  # Estimators
+  "ParticleFilter",
+  "ExtendedKalmanFilter",
+  "UnscentedKalmanFilter",
+  # Benchmarking
+  "BenchmarkResult",
+  "run_benchmark",
+  "evaluate",
+  "generate_trajectory",
+  "corrupt",
+  "format_table",
 ]
 
 if _MJLAB_AVAILABLE:
-    __all__ += [
-        # Environment integration (requires mjlab)
-        "StateEstimationCfg",
-        "StateEstimatorManager",
-        "FilterType",
-        "build_estimator",
-        "get_state_estimator",
-        "has_state_estimator",
-        "reset_state_estimator",
-    ]
+  __all__ += [
+    # Environment integration (requires mjlab)
+    "StateEstimationCfg",
+    "StateEstimatorManager",
+    "FilterType",
+    "build_estimator",
+    "get_state_estimator",
+    "has_state_estimator",
+    "reset_state_estimator",
+  ]

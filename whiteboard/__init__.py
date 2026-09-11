@@ -24,26 +24,26 @@ MJLAB_AVAILABLE: bool
 _IMPORT_ERROR: "ImportError | None" = None
 
 try:
-    from .config.g1 import *  # noqa: F401,F403
+  from .config.g1 import *  # noqa: F401,F403
 
-    MJLAB_AVAILABLE = True
+  MJLAB_AVAILABLE = True
 except ImportError as exc:  # pragma: no cover - depends on install environment
-    if "mjlab" not in str(exc):
-        raise
-    MJLAB_AVAILABLE = False
-    _IMPORT_ERROR = exc
+  if "mjlab" not in str(exc):
+    raise
+  MJLAB_AVAILABLE = False
+  _IMPORT_ERROR = exc
 
 
 def require_mjlab() -> None:
-    """Raise a clear error if the task registry could not be loaded.
+  """Raise a clear error if the task registry could not be loaded.
 
-    Call this from any entry point that genuinely needs the simulator, so the
-    failure names the real cause instead of surfacing later as a missing task id.
-    """
-    if not MJLAB_AVAILABLE:
-        raise ImportError(
-            "The G1 whiteboard task could not be registered because mjlab is "
-            "not installed in this environment. Install mjlab, or use the "
-            "mjlab-free entry points (mdp.state_estimation.benchmark and the "
-            f"tests/ suite). Original error: {_IMPORT_ERROR}"
-        )
+  Call this from any entry point that genuinely needs the simulator, so the
+  failure names the real cause instead of surfacing later as a missing task id.
+  """
+  if not MJLAB_AVAILABLE:
+    raise ImportError(
+      "The G1 whiteboard task could not be registered because mjlab is "
+      "not installed in this environment. Install mjlab, or use the "
+      "mjlab-free entry points (mdp.state_estimation.benchmark and the "
+      f"tests/ suite). Original error: {_IMPORT_ERROR}"
+    )

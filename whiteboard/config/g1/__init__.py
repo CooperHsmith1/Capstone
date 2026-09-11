@@ -37,17 +37,27 @@ def _register() -> None:
   # purely because it was scored on a different measurement stream. The outlier
   # rate is on for all of them because that is the regime the report argues a
   # real depth/vision pen tracker actually lives in.
-  sensor = dict(sensor_noise_std=0.01, outlier_rate=0.05, outlier_scale=25.0)
-
   filters = {
     "PF": StateEstimationCfg(
       filter_type="particle",
       num_particles=512,
       proposal="optimal",
-      **sensor,
+      sensor_noise_std=0.01,
+      outlier_rate=0.05,
+      outlier_scale=25.0,
     ),
-    "EKF": StateEstimationCfg(filter_type="ekf", **sensor),
-    "UKF": StateEstimationCfg(filter_type="ukf", **sensor),
+    "EKF": StateEstimationCfg(
+      filter_type="ekf",
+      sensor_noise_std=0.01,
+      outlier_rate=0.05,
+      outlier_scale=25.0,
+    ),
+    "UKF": StateEstimationCfg(
+      filter_type="ukf",
+      sensor_noise_std=0.01,
+      outlier_rate=0.05,
+      outlier_scale=25.0,
+    ),
   }
 
   for suffix, est_cfg in filters.items():

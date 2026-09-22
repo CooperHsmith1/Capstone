@@ -63,6 +63,7 @@ try:
   from .rewards import (
     pen_approach_reward,
     pen_contact_reward,
+    pen_force_regulation_reward,
     pen_penetration_penalty,
     pen_tracking_reward,
     smooth_pen_motion_reward,
@@ -89,6 +90,7 @@ try:
     "pen_tracking_reward",
     "pen_approach_reward",
     "pen_contact_reward",
+    "pen_force_regulation_reward",
     "pen_penetration_penalty",
     "smooth_pen_motion_reward",
     "upright_reward",

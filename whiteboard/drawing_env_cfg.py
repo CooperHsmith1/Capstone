@@ -1,8 +1,8 @@
 """Whiteboard drawing task configuration for the Unitree G1.
 
 Builds a ``ManagerBasedRlEnvCfg`` for a fixed-base (by default) G1 holding a pen
-in front of a whiteboard, rewarded for tracking a moving circular target on the
-writable surface.
+in front of a whiteboard, rewarded for tracking a moving Gerono figure-eight
+target on the writable surface.
 
 Optionally routes the pen-tip observation through a probabilistic state
 estimator (particle filter, EKF or UKF) instead of feeding the policy ground
@@ -27,6 +27,7 @@ from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.scene import SceneCfg
+from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.tasks.velocity import mdp
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
@@ -50,12 +51,14 @@ from .mdp.draw_target_cmd import DrawTargetCommandCfg
 from .mdp.observations import (
   estimated_pen_position,
   estimated_pen_velocity,
+  pen_contact_force,
   pen_position_uncertainty,
   site_position,
 )
 from .mdp.rewards import (
   pen_approach_reward,
   pen_contact_reward,
+  pen_force_regulation_reward,
   pen_penetration_penalty,
   pen_tracking_reward,
   smooth_pen_motion_reward,
@@ -114,19 +117,19 @@ def make_drawing_env_cfg(
     "base_lin_vel": ObservationTermCfg(
       func=mdp.builtin_sensor,
       params={"sensor_name": "robot/imu_lin_vel"},
-      noise=Unoise(n_min=-0.05, n_max=0.05),
+      noise=Unoise(n_min=-0.02, n_max=0.02),
     ),
     "base_ang_vel": ObservationTermCfg(
       func=mdp.builtin_sensor,
       params={"sensor_name": "robot/imu_ang_vel"},
-      noise=Unoise(n_min=-0.02, n_max=0.02),
+      noise=Unoise(n_min=-0.01, n_max=0.01),
     ),
     "projected_gravity": ObservationTermCfg(func=mdp.projected_gravity),
     "joint_pos": ObservationTermCfg(
-      func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01)
+      func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.005, n_max=0.005)
     ),
     "joint_vel": ObservationTermCfg(
-      func=mdp.joint_vel_rel, noise=Unoise(n_min=-0.1, n_max=0.1)
+      func=mdp.joint_vel_rel, noise=Unoise(n_min=-0.03, n_max=0.03)
     ),
     "actions": ObservationTermCfg(func=mdp.last_action),
     "pen_pos": (
@@ -136,6 +139,9 @@ def make_drawing_env_cfg(
     ),
     "target_pos": ObservationTermCfg(
       func=mdp.generated_commands, params={"command_name": "draw_target"}
+    ),
+    "pen_contact_force": ObservationTermCfg(
+      func=pen_contact_force, params={"sensor_name": "pen_board_contact"}
     ),
   }
 
@@ -184,11 +190,15 @@ def make_drawing_env_cfg(
   # -- commands -----------------------------------------------------------
   commands: dict[str, CommandTermCfg] = {
     "draw_target": DrawTargetCommandCfg(
-      resampling_time_range=(4.0, 8.0),
+      # Hold the target at the reset pen position, move straight toward the
+      # board, and only then start the continuous figure-eight.
+      resampling_time_range=(1.0e9, 1.0e9),
       board_face_x=BOARD_FACE_X,
       writing_x=WRITING_X,
       board_y_range=TARGET_Y_RANGE,
       board_z_range=TARGET_Z_RANGE,
+      approach_start_x=0.42,
+      approach_duration_s=4.0,
     ),
   }
 
@@ -259,6 +269,11 @@ def make_drawing_env_cfg(
         "asset_cfg": _PEN_TIP_CFG,
       },
     ),
+    "pen_force_regulation": RewardTermCfg(
+      func=pen_force_regulation_reward,
+      weight=1.0,
+      params={"sensor_name": "pen_board_contact"},
+    ),
     "pen_penetration": RewardTermCfg(
       func=pen_penetration_penalty,
       weight=-10.0,
@@ -291,6 +306,15 @@ def make_drawing_env_cfg(
       extent=2.0,
       entities={"robot": get_g1_whiteboard_robot_cfg(fixed_base=fixed_base)},
       spec_fn=whiteboard_spec_fn,
+      sensors=(
+        ContactSensorCfg(
+          name="pen_board_contact",
+          primary=ContactMatch(mode="geom", pattern="pen_tip_geom", entity="robot"),
+          secondary=ContactMatch(mode="geom", pattern="whiteboard_surface"),
+          fields=("found", "force"),
+          reduce="netforce",
+        ),
+      ),
     ),
     observations=observations,
     actions=actions,
@@ -311,5 +335,5 @@ def make_drawing_env_cfg(
       mujoco=MujocoCfg(timestep=0.005, iterations=20, ls_iterations=40),
     ),
     decimation=4,
-    episode_length_s=20.0,
+    episode_length_s=30.0,
   )

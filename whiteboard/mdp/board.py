@@ -11,9 +11,9 @@ quietly stops being achievable and the policy plateaus for no visible reason.
 Everything now imports from here. If the board moves in the MJCF, change these
 constants and nothing else.
 
-MJCF reference (g1_29dof_whiteboard.xml)::
+MJCF reference (g1.xml)::
 
-    body pos   = (0.35, 0, 1.10)
+    body pos   = (0.56, 0, 1.65)
     geom size  = (0.02, 0.40, 0.35)      half-extents in (x, y, z)
 
 so the writable face is at x = 0.35 - 0.02 = 0.33, and the physical surface
@@ -24,23 +24,24 @@ from __future__ import annotations
 
 # --- Physical board surface (must match the MJCF) --------------------------
 
-BOARD_CENTRE_X: float = 0.35
+BOARD_CENTRE_X: float = 0.56
 BOARD_CENTRE_Y: float = 0.0
-BOARD_CENTRE_Z: float = 1.10
+BOARD_CENTRE_Z: float = 1.65
+FLOOR_Z: float = 0.0
 
 BOARD_HALF_DEPTH: float = 0.02
 BOARD_HALF_WIDTH: float = 0.40
 BOARD_HALF_HEIGHT: float = 0.35
 
 #: World/env-local X of the face the robot writes on (the -X face).
-BOARD_FACE_X: float = BOARD_CENTRE_X - BOARD_HALF_DEPTH  # 0.33
+BOARD_FACE_X: float = BOARD_CENTRE_X - BOARD_HALF_DEPTH  # 0.54
 WRITING_X: float = BOARD_FACE_X - 0.008
 
 #: Full physical extent of the drawable surface.
 BOARD_Y_MIN: float = BOARD_CENTRE_Y - BOARD_HALF_WIDTH  # -0.40
 BOARD_Y_MAX: float = BOARD_CENTRE_Y + BOARD_HALF_WIDTH  # +0.40
-BOARD_Z_MIN: float = BOARD_CENTRE_Z - BOARD_HALF_HEIGHT  #  0.75
-BOARD_Z_MAX: float = BOARD_CENTRE_Z + BOARD_HALF_HEIGHT  #  1.45
+BOARD_Z_MIN: float = BOARD_CENTRE_Z - BOARD_HALF_HEIGHT  #  1.30
+BOARD_Z_MAX: float = BOARD_CENTRE_Z + BOARD_HALF_HEIGHT  #  2.00
 
 
 # --- Target sampling region (a margin inside the physical surface) ---------
@@ -68,6 +69,7 @@ TARGET_Z_RANGE: tuple[float, float] = (
 
 #: How close in X the pen tip must be to the face to count as touching.
 CONTACT_X_THRESHOLD: float = 0.015
+PEN_TIP_RADIUS: float = 0.008
 
 
 def validate() -> None:

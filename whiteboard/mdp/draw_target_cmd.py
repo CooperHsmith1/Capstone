@@ -1,17 +1,20 @@
-"""DrawTargetCommand — moves a 3-D target around a circle on the whiteboard.
+"""DrawTargetCommand — reaches the board, then moves along a figure-eight.
 
-The whiteboard in the MJCF lives at world position (0.35, 0, 1.1) with a
+The whiteboard in the MJCF lives at world position (0.56, 0, 1.65) with a
 half-extent of (0.02, 0.4, 0.35) in (x, y, z).  The face the robot writes on
 is the -X face, so all targets share the constant X value of the writing plane
-(``0.322``).  Y and Z follow a configurable circular path within the board
-bounds.
+(``0.322``). Y and Z follow a Gerono lemniscate (a symmetric figure eight)
+within the board bounds:
+
+``y = centre_y + radius * sin(t)``
+``z = centre_z + radius * sin(t) * cos(t)``
 
 Usage in env cfg::
 
     commands: dict[str, CommandTermCfg] = {
         "draw_target": DrawTargetCommandCfg(
             radius=0.15,
-            angular_speed=0.8,
+            angular_speed=0.25,
         ),
     }
 
@@ -44,7 +47,7 @@ if TYPE_CHECKING:
 
 
 class DrawTargetCommand(CommandTerm):
-  """Moves the target continuously around a circular path on the board."""
+  """Approaches the board before moving the target around a Gerono figure-eight."""
 
   cfg: DrawTargetCommandCfg
 
@@ -64,6 +67,7 @@ class DrawTargetCommand(CommandTerm):
     # [B, 3]  —  (x=board_face_x, y=uniform, z=uniform)
     self._target = torch.zeros(num_envs, 3, device=device)
     self._phase = torch.zeros(num_envs, device=device)
+    self._elapsed = torch.zeros(num_envs, device=device)
     self._target[:, 0] = cfg.writing_x
 
     super().__init__(cfg, env)
@@ -75,6 +79,7 @@ class DrawTargetCommand(CommandTerm):
     self.metrics["pen_dist_to_target"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["pen_surface_error"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["pen_penetration"] = torch.zeros(self.num_envs, device=self.device)
+    self.metrics["figure_eight_phase"] = torch.zeros(self.num_envs, device=self.device)
 
     # Initialise with a random first sample so episode 0 is not all zeros.
     self._resample_command(torch.arange(self.num_envs, device=self.device))
@@ -90,19 +95,42 @@ class DrawTargetCommand(CommandTerm):
 
   def _resample_command(self, env_ids: torch.Tensor) -> None:
     self._phase[env_ids] = 0.0
+    self._elapsed[env_ids] = 0.0
     self._set_circle_target(env_ids)
 
   def _update_command(self, env_ids: torch.Tensor | None = None) -> None:
     del env_ids
-    self._phase += self._env.step_dt * self.cfg.angular_speed
+    dt = self._env.step_dt
+    self._elapsed += dt
+    drawing = self._elapsed >= self.cfg.approach_duration_s
+    self._phase[drawing] += dt * self.cfg.angular_speed
     self._set_circle_target()
 
   def _set_circle_target(self, env_ids: torch.Tensor | None = None) -> None:
     ids = slice(None) if env_ids is None else env_ids
     phase = self._phase[ids]
-    self._target[ids, 0] = self.cfg.writing_x
-    self._target[ids, 1] = self.cfg.center_y + self.cfg.radius * torch.cos(phase)
-    self._target[ids, 2] = self.cfg.center_z + self.cfg.radius * torch.sin(phase)
+    elapsed = self._elapsed[ids]
+    approach = torch.clamp(elapsed / self.cfg.approach_duration_s, 0.0, 1.0)
+    self._target[ids, 0] = self.cfg.approach_start_x + approach * (
+      self.cfg.writing_x - self.cfg.approach_start_x
+    )
+    # Gerono lemniscate: y = sin(t), z = sin(t) * cos(t). This is a
+    # symmetric planar figure-eight with a single crossing at the centre.
+    y = self.cfg.center_y + self.cfg.radius * torch.sin(phase)
+    z = self.cfg.center_z + self.cfg.radius * (
+      torch.sin(phase) * torch.cos(phase)
+    )
+    drawing = elapsed >= self.cfg.approach_duration_s
+    self._target[ids, 1] = torch.where(
+      drawing,
+      y,
+      torch.full_like(y, self.cfg.center_y),
+    )
+    self._target[ids, 2] = torch.where(
+      drawing,
+      z,
+      torch.full_like(z, self.cfg.center_z),
+    )
 
   def _update_metrics(self) -> None:
     pen_pos = self._get_pen_tip_pos()
@@ -110,10 +138,9 @@ class DrawTargetCommand(CommandTerm):
       # Keep this PER-ENV (shape [B]); do NOT call .mean() — the command
       # manager indexes the metric as metric[env_ids] on reset.
       self.metrics["pen_dist_to_target"] = torch.norm(pen_pos - self._target, dim=1)
-      self.metrics["pen_surface_error"] = torch.abs(
-        pen_pos[:, 0] - self.cfg.writing_x
-      )
+      self.metrics["pen_surface_error"] = torch.abs(pen_pos[:, 0] - self.cfg.writing_x)
       self.metrics["pen_penetration"] = torch.relu(pen_pos[:, 0] - BOARD_FACE_X)
+      self.metrics["figure_eight_phase"] = torch.remainder(self._phase, 2.0 * torch.pi)
     # If pen_pos is None (early setup), keep the existing per-env tensor
     # already created in __init__ (shape [B]).
 
@@ -161,6 +188,8 @@ class DrawTargetCommandCfg(CommandTermCfg):
       writing_x: World X coordinate of the writing plane in front of the face.
       board_y_range: Valid horizontal range on the board.
       board_z_range: Valid vertical range on the board.
+          approach_start_x: Initial target X, matching the reset pen position.
+          approach_duration_s: Time spent reaching the board before drawing.
   """
 
   board_face_x: float = BOARD_FACE_X
@@ -171,6 +200,8 @@ class DrawTargetCommandCfg(CommandTermCfg):
   center_z: float = BOARD_CENTRE_Z
   radius: float = 0.15
   angular_speed: float = 0.25
+  approach_start_x: float = 0.42
+  approach_duration_s: float = 4.0
 
   def build(self, env: ManagerBasedRlEnv) -> DrawTargetCommand:
     return DrawTargetCommand(self, env)

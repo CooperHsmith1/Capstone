@@ -7,6 +7,7 @@ import torch
 from mjlab.entity import Entity
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
+from .board import PEN_TIP_RADIUS
 from .cfg_utils import resolve_first_site_id
 
 if TYPE_CHECKING:
@@ -80,7 +81,23 @@ def pen_penetration_penalty(
 ) -> torch.Tensor:
   """Return pen depth past the physical board face for a negative reward."""
   pen_pos = _pen_tip_pos_local(env, asset_cfg)
-  return torch.relu(pen_pos[:, 0] - whiteboard_x)
+  return torch.relu(pen_pos[:, 0] + PEN_TIP_RADIUS - whiteboard_x)
+
+
+def pen_force_regulation_reward(
+  env: "ManagerBasedRlEnv",
+  sensor_name: str,
+  target_force: float = 2.0,
+  force_tolerance: float = 1.0,
+) -> torch.Tensor:
+  """Reward a light, bounded pen-board force for real-world transfer."""
+  sensor = env.scene[sensor_name]
+  force = sensor.data.force
+  assert force is not None, f"Sensor '{sensor_name}' must provide force data."
+  # The board face is normal to X. Regulate only the inward normal load;
+  # tangential friction is useful for drawing but should not count as pressure.
+  normal_force = torch.abs(force[:, 0, 0])
+  return torch.exp(-torch.abs(normal_force - target_force) / force_tolerance)
 
 
 def pen_contact_reward(

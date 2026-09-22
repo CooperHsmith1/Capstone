@@ -20,15 +20,12 @@ def unitree_g1_drawing_env_cfg(
 ) -> ManagerBasedRlEnvCfg:
   """Create the Unitree G1 whiteboard drawing environment configuration.
 
-  Training stages (controlled by the command resampling range):
-    Early  : targets held 4-8 s so the arm has time to converge.
-    Later  : tighten to 2-4 s once the policy reliably reaches points.
-    Future : swap DrawTargetCommandCfg for a path-following command to draw
-             shapes and letters.
+  The registered command is a continuous Gerono figure-eight. Its phase is
+  reset only with the environment, never by command resampling.
 
   Args:
-    play: Play/eval mode -- disables observation corruption, extends the
-      episode, and holds each target longer so the arm can be watched.
+    play: Play/eval mode -- disables observation corruption and extends the
+      episode so a complete figure-eight can be watched.
     num_envs: Parallel environments. Override from the CLI with
       ``--env.scene.num-envs``.
     fixed_base: Bolt the robot to the world. Recommended until the reaching
@@ -57,15 +54,18 @@ def unitree_g1_drawing_env_cfg(
     cfg.episode_length_s = int(1e9)
     cfg.observations["actor"].enable_corruption = False
     cfg.curriculum = {}
-    # Hold each target longer in play so the arm can be watched reaching it.
+    # Keep the deterministic figure-eight phase continuous in play mode too.
     cfg.commands["draw_target"] = DrawTargetCommandCfg(
-      resampling_time_range=(6.0, 10.0),
+      resampling_time_range=(1.0e9, 1.0e9),
       board_face_x=BOARD_FACE_X,
       writing_x=WRITING_X,
       board_y_range=TARGET_Y_RANGE,
       board_z_range=TARGET_Z_RANGE,
       radius=0.15,
       angular_speed=0.25,
+      approach_start_x=0.42,
+      approach_duration_s=4.0,
     )
+    cfg.episode_length_s = 30.0
 
   return cfg

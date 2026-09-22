@@ -39,6 +39,7 @@ from .board import (
   BOARD_HALF_DEPTH,
   BOARD_HALF_HEIGHT,
   BOARD_HALF_WIDTH,
+  FLOOR_Z,
 )
 
 __all__ = [
@@ -121,6 +122,23 @@ def add_pen(spec: mujoco.MjSpec) -> mujoco.MjSpec:
     mass=0.02,
     contype=0,
     conaffinity=0,
+    friction=[0.8, 0.02, 0.001],
+    condim=3,
+    solref=[0.015, 1.0],
+    solimp=[0.85, 0.95, 0.001, 0.5, 2.0],
+  )
+  pen.add_geom(
+    name="pen_tip_geom",
+    type=mujoco.mjtGeom.mjGEOM_SPHERE,
+    pos=[PEN_LENGTH, 0.0, 0.0],
+    size=[PEN_RADIUS, 0.0, 0.0],
+    rgba=[0.05, 0.05, 0.05, 1.0],
+    contype=4,
+    conaffinity=4,
+    friction=[0.8, 0.02, 0.001],
+    condim=3,
+    solref=[0.015, 1.0],
+    solimp=[0.85, 0.95, 0.001, 0.5, 2.0],
   )
 
   # The tip site. contype/conaffinity are irrelevant for sites; the contact
@@ -227,6 +245,20 @@ def whiteboard_spec_fn(spec: mujoco.MjSpec) -> None:
     size=[BOARD_HALF_DEPTH, BOARD_HALF_WIDTH, BOARD_HALF_HEIGHT],
     material=BOARD_MATERIAL,
     rgba=[1.0, 1.0, 1.0, 1.0],
+    contype=4,
+    conaffinity=4,
+    friction=[0.8, 0.02, 0.001],
+    condim=3,
+    solref=[0.015, 1.0],
+    solimp=[0.85, 0.95, 0.001, 0.5, 2.0],
+  )
+  floor = spec.worldbody.add_body(name="whiteboard_floor", pos=[0.0, 0.0, FLOOR_Z])
+  floor.add_geom(
+    name="whiteboard_floor_geom",
+    type=mujoco.mjtGeom.mjGEOM_PLANE,
+    size=[5.0, 5.0, 0.1],
+    rgba=[0.18, 0.18, 0.18, 1.0],
     contype=1,
     conaffinity=1,
+    friction=[0.8, 0.02, 0.001],
   )

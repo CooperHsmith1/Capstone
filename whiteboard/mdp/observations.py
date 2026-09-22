@@ -81,6 +81,14 @@ def site_position(
   return pos_w - env.scene.env_origins  # [B, 3] env-local
 
 
+def pen_contact_force(env: ManagerBasedRlEnv, sensor_name: str) -> torch.Tensor:
+  """Return the measured pen-board contact force as a log-scaled vector."""
+  sensor = env.scene[sensor_name]
+  force = sensor.data.force
+  assert force is not None, f"Sensor '{sensor_name}' must provide force data."
+  return torch.sign(force[:, 0, :]) * torch.log1p(torch.abs(force[:, 0, :]))
+
+
 # ---------------------------------------------------------------------------
 # FILTERED STATE OBSERVATIONS
 # ---------------------------------------------------------------------------

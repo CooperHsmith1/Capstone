@@ -36,6 +36,7 @@ from .board import (  # noqa: E402
   BOARD_Z_MAX,
   BOARD_Z_MIN,
   CONTACT_X_THRESHOLD,
+  PEN_TIP_RADIUS,
 )
 
 PIXELS_PER_METRE: int = 300
@@ -82,6 +83,10 @@ class DrawingCanvas:
         self._pen_tip_id = _mujoco_rt.mj_name2id(
           model, _mujoco_rt.mjtObj.mjOBJ_SITE, pen_tip_site
         )
+        if self._pen_tip_id < 0:
+          self._pen_tip_id = _mujoco_rt.mj_name2id(
+            model, _mujoco_rt.mjtObj.mjOBJ_SITE, f"robot/{pen_tip_site}"
+          )
       except Exception:
         pass
 
@@ -139,7 +144,7 @@ class DrawingCanvas:
     # Only paint on the robot-facing side. A tip that has crossed the board
     # must not produce a valid stroke even if it is still near the face.
     if not (
-      BOARD_FACE_X - CONTACT_X_THRESHOLD <= x <= BOARD_FACE_X + 0.002
+      BOARD_FACE_X - CONTACT_X_THRESHOLD <= x <= BOARD_FACE_X - PEN_TIP_RADIUS + 0.002
     ):
       return False
     if not (BOARD_Y_MIN <= y <= BOARD_Y_MAX and BOARD_Z_MIN <= z <= BOARD_Z_MAX):
@@ -151,6 +156,24 @@ class DrawingCanvas:
     )
     self._paint_dot(px, py)
     return True
+
+  def sync_texture(self, model: mujoco.MjModel) -> None:
+    """Copy the current canvas into MuJoCo texture storage.
+
+    Viser owns its render context, so the environment cannot call
+    ``mjr_uploadTexture`` directly. Updating model texture storage here keeps
+    the canvas authoritative for renderers that upload textures on refresh.
+    """
+    if self._texture_id < 0:
+      return
+    tex = model.tex(self._texture_id)
+    target_h = int(np.atleast_1d(tex.height)[0])
+    target_w = int(np.atleast_1d(tex.width)[0])
+    pixels = self._resize_canvas(target_h, target_w)
+    if tex.data.ndim == 3:
+      tex.data[:] = pixels
+    else:
+      tex.data[:] = pixels.reshape(-1)
 
   def upload_texture(
     self,

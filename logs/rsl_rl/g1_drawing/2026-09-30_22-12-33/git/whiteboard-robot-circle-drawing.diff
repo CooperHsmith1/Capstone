@@ -1,0 +1,1200 @@
+--- git commit ---
+a891a06f8ff3e3443e68a916a3dc9acbf35bb8d7
+
+
+--- git status ---
+On branch agents/whiteboard-robot-circle-drawing
+Changes not staged for commit:
+  (use "git add/rm <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   docs/source/changelog.rst
+	modified:   src/mjlab/asset_zoo/robots/unitree_g1/xmls/g1.xml
+	modified:   src/mjlab/tasks/whiteboard/config/g1/env_cfgs.py
+	modified:   src/mjlab/tasks/whiteboard/drawing_env_cfg.py
+	deleted:    src/mjlab/tasks/whiteboard/env_cfg.py
+	modified:   src/mjlab/tasks/whiteboard/mdp/__init__.py
+	modified:   src/mjlab/tasks/whiteboard/mdp/assets.py
+	modified:   src/mjlab/tasks/whiteboard/mdp/board.py
+	deleted:    src/mjlab/tasks/whiteboard/mdp/commands.py
+	modified:   src/mjlab/tasks/whiteboard/mdp/draw_target_cmd.py
+	modified:   src/mjlab/tasks/whiteboard/mdp/observations.py
+	modified:   src/mjlab/tasks/whiteboard/mdp/rewards.py
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	tests/test_whiteboard_task.py
+
+no changes added to commit (use "git add" and/or "git commit -a") 
+
+
+--- git diff ---
+diff --git a/docs/source/changelog.rst b/docs/source/changelog.rst
+index 4aca0020b..f8d239302 100644
+--- a/docs/source/changelog.rst
++++ b/docs/source/changelog.rst
+@@ -5,9 +5,18 @@ Changelog
+ Upcoming version (not yet released)
+ -----------------------------------
+ 
++Added
++^^^^^
++
++- Added physical pen-tip/whiteboard collision sensing and a bounded contact-force
++  penalty to the G1 drawing task.
++
+ Changed
+ ^^^^^^^
+ 
++- Changed the G1 whiteboard task to hold a reachable center target before following
++  a continuous Gerono figure eight, with matching timing in training and playback.
++- Extended the drawing episode so it includes a complete figure-eight cycle.
+ - Bumped ``rsl-rl-lib`` from 5.4.2 to 5.5.0. This update removes the ``logger_type``
+   attribute of the ``rsl_rl.utils.Logger``, so code that previously checked
+   ``logger.logger_type`` must instead check the type of ``logger.writer``.
+@@ -15,6 +24,16 @@ Changed
+ Fixed
+ ^^^^^
+ 
++- Restored the shared Unitree G1 asset (``g1.xml``) to its pristine, task-agnostic
++  form. A prior commit had hardcoded a pen, a whiteboard, and a partial
++  ``<actuator>`` block (waist and arms only) directly into the robot XML, which
++  left every leg joint unactuated in floating-base environments and caused the
++  robot to appear frozen or collapsed during training and playback. The pen and
++  whiteboard are now added purely programmatically by the drawing task, and all
++  29 joints are actuated through ``G1_ARTICULATION`` as intended.
++- Removed the dead legacy ``whiteboard/env_cfg.py`` and ``whiteboard/mdp/commands.py``
++  modules (an unused, superseded circle-drawing command path) that were not
++  registered or imported anywhere.
+ - Capped ``wandb`` below 0.29, which removed the ``start_method`` setting still passed
+   by ``rsl-rl-lib`` and crashed training runs launched with ``--logger wandb``.
+ - ``distribution="gaussian"`` domain randomization now draws an independent value per
+diff --git a/src/mjlab/asset_zoo/robots/unitree_g1/xmls/g1.xml b/src/mjlab/asset_zoo/robots/unitree_g1/xmls/g1.xml
+index f92d428aa..dda47796e 100644
+--- a/src/mjlab/asset_zoo/robots/unitree_g1/xmls/g1.xml
++++ b/src/mjlab/asset_zoo/robots/unitree_g1/xmls/g1.xml
+@@ -1,8 +1,6 @@
+ <mujoco model="g1_29dof_rev_1_0">
+   <compiler angle="radian" meshdir="assets" autolimits="true"/>
+ 
+-  <option timestep="0.002"/>
+-
+   <default>
+     <default class="g1">
+       <default class="visual">
+@@ -21,23 +19,6 @@
+   <asset>
+     <material name="silver" rgba="0.7 0.7 0.7 1"/>
+     <material name="black" rgba="0.2 0.2 0.2 1"/>
+-    <!-- Whiteboard: 2-D texture (256×256) so drawing_canvas.py can upload
+-         pixel data each step.  The texture starts as plain white.
+-         type="2d" is required for mjr_uploadTexture to work correctly. -->
+-    <texture name="whiteboard_tex"
+-             type="2d"
+-             width="256" height="256"
+-             rgb1="0.97 0.97 0.97" rgb2="0.97 0.97 0.97"
+-             builtin="flat"/>
+-    <material name="whiteboard"
+-              texture="whiteboard_tex"
+-              texrepeat="1 1"
+-              texuniform="false"
+-              rgba="1 1 1 1"/>
+-
+-    <!-- Pen materials -->
+-    <material name="pen_body" rgba="0.1 0.1 0.8 1"/>
+-    <material name="pen_tip_mat" rgba="0.05 0.05 0.05 1"/>
+ 
+     <mesh name="pelvis" file="pelvis.STL"/>
+     <mesh name="pelvis_contour_link" file="pelvis_contour_link.STL"/>
+@@ -77,10 +58,6 @@
+   </asset>
+ 
+   <worldbody>
+-
+-    <!-- =========================================================
+-         ROBOT
+-    ========================================================= -->
+     <body name="pelvis" pos="0 0 0.793" childclass="g1">
+       <light pos="0 0 2" mode="trackcom" castshadow="false"/>
+       <camera name="tracking" pos="1.734 -1.135 .35" xyaxes="0.552 0.834 -0.000 -0.170 0.112 0.979" mode="trackcom"/>
+@@ -303,52 +280,6 @@
+                             material="black"/>
+                           <site name="right_palm" pos="0.08 0 0" size="0.01"/>
+                           <geom name="right_hand_collision" class="collision" size="0.035" fromto="0.07 0 0 0.15 0.02 0"/>
+-
+-                          <!-- =====================================================
+-                               PEN — rigidly attached to the right wrist yaw link.
+-                               Positioned so it extends forward (+X of the hand
+-                               frame) past the rubber hand fingertips.
+-
+-                               The pen body has NO joint, so it is welded to the
+-                               wrist yaw link and moves with it exactly.
+-
+-                               Geometry:
+-                                 pen_body   : blue cylinder, 14 cm long, 6 mm radius
+-                                 pen_tip_cap: small dark sphere marking the writing end
+-
+-                               Coordinate convention (right_wrist_yaw_link frame):
+-                                 +X = forward out of the hand
+-                               The pen is offset 0.09 m along X so it sits in the
+-                               gripped position (rubber hand centre ~0.08 m),
+-                               then extends 0.14 m further to the tip.
+-                          ====================================================== -->
+-                          <body name="pen" pos="0.09 0 0">
+-                            <!-- Pen shaft — cylinder along local X axis.
+-                                 fromto is relative to the pen body origin. -->
+-                            <geom name="pen_shaft"
+-                                  type="cylinder"
+-                                  fromto="0 0 0  0.14 0 0"
+-                                  size="0.006"
+-                                  material="pen_body"
+-                                  contype="0" conaffinity="0"
+-                                  group="1"/>
+-                            <!-- Pen tip marker (dark cap) -->
+-                            <geom name="pen_tip_geom"
+-                                  type="sphere"
+-                                  size="0.007"
+-                                  pos="0.14 0 0"
+-                                  material="pen_tip_mat"
+-                                  contype="4" conaffinity="4"
+-                                  group="1"/>
+-                            <!-- Site at the very tip — use this for contact
+-                                 detection and trajectory logging -->
+-                            <site name="pen_tip"
+-                                  pos="0.147 0 0"
+-                                  size="0.004"
+-                                  rgba="1 0 0 1"/>
+-                          </body>
+-                          <!-- END PEN -->
+-
+                         </body>
+                       </body>
+                     </body>
+@@ -360,90 +291,18 @@
+         </body>
+       </body>
+     </body>
+-    <!-- =========================================================
+-         WHITEBOARD
+-         Placed 0.6 m in front of the robot, face pointing toward
+-         the robot (normal along -X world axis).  The board surface
+-         is the YZ plane of the board body; its centre is at roughly
+-         shoulder height (~1.1 m).  The thin box doubles as a
+-         collision geom so you can detect pen-tip contact.
+-    ========================================================= -->
+-    <body name="whiteboard" pos="0.35 0 1.10">
+-      <geom name="whiteboard_surface"
+-            type="box"
+-            size="0.02 0.40 0.35"
+-            material="whiteboard"
+-            contype="4" conaffinity="4"
+-            group="1"/>
+-      <site name="board_face" pos="-0.02 0 0" size="0.005" rgba="0 0 1 0.5"/>
+-    </body>
+   </worldbody>
+-
+   <contact>
+     <exclude body1="left_elbow_link" body2="left_wrist_pitch_link"/>
+     <exclude body1="right_elbow_link" body2="right_wrist_pitch_link"/>
+     <exclude body1="pelvis" body2="right_hip_roll_link"/>
+     <exclude body1="pelvis" body2="left_hip_roll_link"/>
+-    <!-- Prevent pen shaft from self-colliding with the hand geoms -->
+-    <exclude body1="pen" body2="right_wrist_yaw_link"/>
+   </contact>
+-
+   <sensor>
+     <gyro name="imu_ang_vel" site="imu_in_pelvis"/>
+     <velocimeter name="imu_lin_vel" site="imu_in_pelvis"/>
+     <accelerometer name="imu_lin_acc" site="imu_in_pelvis"/>
++    <framezaxis name="imu_upvector" objtype="body" objname="world" reftype="site" refname="imu_in_pelvis"/>
+     <subtreeangmom name="root_angmom" body="pelvis"/>
+-    <!-- Track pen tip position in world frame -->
+-    <framepos name="pen_tip_pos" objtype="site" objname="pen_tip"/>
+-    <!-- Detect contact between pen tip sphere and whiteboard surface -->
+   </sensor>
+-
+-  <!-- =========================================================
+-       ACTUATORS — position-controlled motors for the right arm.
+-       kp values are rough starting points; tune to your
+-       controller.  The left arm, legs and waist are included
+-       for completeness but you can remove unused ones.
+-  ========================================================= -->
+-  <actuator>
+-    <!-- Waist -->
+-    <position name="waist_yaw"   joint="waist_yaw_joint"   kp="200" ctrlrange="-2.618 2.618"/>
+-    <position name="waist_roll"  joint="waist_roll_joint"  kp="200" ctrlrange="-0.52 0.52"/>
+-    <position name="waist_pitch" joint="waist_pitch_joint" kp="200" ctrlrange="-0.52 0.52"/>
+-
+-    <!-- Right arm — primary drawing chain -->
+-    <position name="right_shoulder_pitch" joint="right_shoulder_pitch_joint" kp="150" ctrlrange="-3.0892 2.6704"/>
+-    <position name="right_shoulder_roll"  joint="right_shoulder_roll_joint"  kp="150" ctrlrange="-2.2515 1.5882"/>
+-    <position name="right_shoulder_yaw"   joint="right_shoulder_yaw_joint"   kp="100" ctrlrange="-2.618 2.618"/>
+-    <position name="right_elbow"          joint="right_elbow_joint"          kp="100" ctrlrange="-1.0472 2.0944"/>
+-    <position name="right_wrist_roll"     joint="right_wrist_roll_joint"     kp="60"  ctrlrange="-1.97222 1.97222"/>
+-    <position name="right_wrist_pitch"    joint="right_wrist_pitch_joint"    kp="60"  ctrlrange="-1.61443 1.61443"/>
+-    <position name="right_wrist_yaw"      joint="right_wrist_yaw_joint"      kp="60"  ctrlrange="-1.61443 1.61443"/>
+-
+-    <!-- Left arm (passive / counterbalance) -->
+-    <position name="left_shoulder_pitch" joint="left_shoulder_pitch_joint" kp="150" ctrlrange="-3.0892 2.6704"/>
+-    <position name="left_shoulder_roll"  joint="left_shoulder_roll_joint"  kp="150" ctrlrange="-1.5882 2.2515"/>
+-    <position name="left_shoulder_yaw"   joint="left_shoulder_yaw_joint"   kp="100" ctrlrange="-2.618 2.618"/>
+-    <position name="left_elbow"          joint="left_elbow_joint"          kp="100" ctrlrange="-1.0472 2.0944"/>
+-    <position name="left_wrist_roll"     joint="left_wrist_roll_joint"     kp="60"  ctrlrange="-1.97222 1.97222"/>
+-    <position name="left_wrist_pitch"    joint="left_wrist_pitch_joint"    kp="60"  ctrlrange="-1.61443 1.61443"/>
+-    <position name="left_wrist_yaw"      joint="left_wrist_yaw_joint"      kp="60"  ctrlrange="-1.61443 1.61443"/>
+-  </actuator>
+-
+-  <!-- =========================================================
+-       KEYFRAME — a starting pose with the right arm reaching
+-       toward the whiteboard.  Load with:
+-         mj_resetDataKeyframe(model, data, 0);
+-       Joint order matches the freejoint (7) + legs (12) +
+-       waist (3) + left arm (7) + right arm (7) = 36 qpos values.
+-
+-       Pose intention:
+-         - Robot standing (legs near zero)
+-         - Right arm extended forward and slightly across body,
+-           elbow bent, wrist pitched forward so pen faces board
+-         - Left arm relaxed at side
+-  ========================================================= -->
+-  <equality>
+-    <weld name="pin_pelvis" body1="pelvis"/>
+-  </equality>
+-
+-</mujoco>
+\ No newline at end of file
++</mujoco>
+diff --git a/src/mjlab/tasks/whiteboard/config/g1/env_cfgs.py b/src/mjlab/tasks/whiteboard/config/g1/env_cfgs.py
+index b95677b70..ea7fa0c84 100644
+--- a/src/mjlab/tasks/whiteboard/config/g1/env_cfgs.py
++++ b/src/mjlab/tasks/whiteboard/config/g1/env_cfgs.py
+@@ -2,29 +2,19 @@
+ 
+ from mjlab.envs import ManagerBasedRlEnvCfg
+ from mjlab.tasks.whiteboard.drawing_env_cfg import make_drawing_env_cfg
+-from mjlab.tasks.whiteboard.mdp.board import (
+-  BOARD_FACE_X,
+-  TARGET_Y_RANGE,
+-  TARGET_Z_RANGE,
+-  WRITING_X,
+-)
+-from mjlab.tasks.whiteboard.mdp.draw_target_cmd import DrawTargetCommandCfg
+ from mjlab.tasks.whiteboard.mdp.state_estimation import StateEstimationCfg
+ 
+ 
+ def unitree_g1_drawing_env_cfg(
+   play: bool = False,
+   num_envs: int = 4096,
+-  fixed_base: bool = True,
++  fixed_base: bool = False,
+   state_estimation: StateEstimationCfg | None = None,
+ ) -> ManagerBasedRlEnvCfg:
+   """Create the Unitree G1 whiteboard drawing environment configuration.
+ 
+-  Training stages (controlled by the command resampling range):
+-    Early  : targets held 4-8 s so the arm has time to converge.
+-    Later  : tighten to 2-4 s once the policy reliably reaches points.
+-    Future : swap DrawTargetCommandCfg for a path-following command to draw
+-             shapes and letters.
++  The target holds at the board center while the robot approaches, then follows
++  a complete Gerono figure-eight. Training and playback use the same path.
+ 
+   Args:
+     play: Play/eval mode -- disables observation corruption, extends the
+@@ -57,13 +47,4 @@ def unitree_g1_drawing_env_cfg(
+     cfg.episode_length_s = int(1e9)
+     cfg.observations["actor"].enable_corruption = False
+     cfg.curriculum = {}
+-    # Hold each target longer in play so the arm can be watched reaching it.
+-    cfg.commands["draw_target"] = DrawTargetCommandCfg(
+-      resampling_time_range=(6.0, 10.0),
+-      board_face_x=BOARD_FACE_X,
+-      writing_x=WRITING_X,
+-      board_y_range=TARGET_Y_RANGE,
+-      board_z_range=TARGET_Z_RANGE,
+-    )
+-
+   return cfg
+diff --git a/src/mjlab/tasks/whiteboard/drawing_env_cfg.py b/src/mjlab/tasks/whiteboard/drawing_env_cfg.py
+index c6f2b2a3c..5ccb29951 100644
+--- a/src/mjlab/tasks/whiteboard/drawing_env_cfg.py
++++ b/src/mjlab/tasks/whiteboard/drawing_env_cfg.py
+@@ -1,8 +1,7 @@
+ """Whiteboard drawing task configuration for the Unitree G1.
+ 
+-Builds a ``ManagerBasedRlEnvCfg`` for a fixed-base (by default) G1 holding a pen
+-in front of a whiteboard, rewarded for tracking randomly sampled target points
+-on the board face.
++Builds a floating-base G1 environment that approaches a centered board target,
++then tracks a continuous figure-eight while sensing pen-board contact.
+ 
+ Optionally routes the pen-tip observation through a probabilistic state
+ estimator (particle filter, EKF or UKF) instead of feeding the policy ground
+@@ -27,6 +26,7 @@ from mjlab.managers.reward_manager import RewardTermCfg
+ from mjlab.managers.scene_entity_config import SceneEntityCfg
+ from mjlab.managers.termination_manager import TerminationTermCfg
+ from mjlab.scene import SceneCfg
++from mjlab.sensor import ContactMatch, ContactSensorCfg
+ from mjlab.sim import MujocoCfg, SimulationCfg
+ from mjlab.tasks.velocity import mdp
+ from mjlab.utils.noise import UniformNoiseCfg as Unoise
+@@ -50,14 +50,17 @@ from .mdp.draw_target_cmd import DrawTargetCommandCfg
+ from .mdp.observations import (
+   estimated_pen_position,
+   estimated_pen_velocity,
++  pen_board_contact_force,
+   pen_position_uncertainty,
+   site_position,
+ )
+ from .mdp.rewards import (
++  pen_contact_force_penalty,
+   pen_contact_reward,
+   pen_tracking_reward,
+   smooth_pen_motion_reward,
+   upright_reward,
++  walk_to_board_reward,
+ )
+ from .mdp.state_estimation import StateEstimationCfg, reset_state_estimator
+ 
+@@ -85,7 +88,7 @@ _TORSO_CFG = SceneEntityCfg("robot", body_names=("torso_link",))
+ 
+ def make_drawing_env_cfg(
+   num_envs: int = 4096,
+-  fixed_base: bool = True,
++  fixed_base: bool = False,
+   state_estimation: StateEstimationCfg | None = None,
+ ) -> ManagerBasedRlEnvCfg:
+   """Create the whiteboard drawing environment configuration.
+@@ -135,6 +138,13 @@ def make_drawing_env_cfg(
+     "target_pos": ObservationTermCfg(
+       func=mdp.generated_commands, params={"command_name": "draw_target"}
+     ),
++    "foot_contact": ObservationTermCfg(
++      func=mdp.foot_contact, params={"sensor_name": "feet_ground_contact"}
++    ),
++    "pen_board_force": ObservationTermCfg(
++      func=pen_board_contact_force,
++      params={"sensor_name": "pen_board_contact"},
++    ),
+   }
+ 
+   if filtered:
+@@ -171,7 +181,7 @@ def make_drawing_env_cfg(
+   actions: dict[str, ActionTermCfg] = {
+     "joint_pos": JointPositionActionCfg(
+       entity_name="robot",
+-      actuator_names=RIGHT_ARM_JOINTS,
++      actuator_names=(".*",),
+       scale=0.5,
+       use_default_offset=True,
+     )
+@@ -180,7 +190,7 @@ def make_drawing_env_cfg(
+   # -- commands -----------------------------------------------------------
+   commands: dict[str, CommandTermCfg] = {
+     "draw_target": DrawTargetCommandCfg(
+-      resampling_time_range=(4.0, 8.0),
++      resampling_time_range=(1000.0, 1000.0),
+       board_face_x=BOARD_FACE_X,
+       writing_x=WRITING_X,
+       board_y_range=TARGET_Y_RANGE,
+@@ -216,6 +226,8 @@ def make_drawing_env_cfg(
+         "pose_range": {
+           "x": (0.0, 0.0),
+           "y": (0.0, 0.0),
++          # The keyframe already sets the root height to z=0.76. This event
++          # supplies an offset, so adding another 0.76 m would make it hover.
+           "z": (0.0, 0.0),
+           "yaw": (0.0, 0.0),
+         },
+@@ -241,10 +253,23 @@ def make_drawing_env_cfg(
+       weight=10.0,
+       params={"command_name": "draw_target", "asset_cfg": _PEN_TIP_CFG},
+     ),
++    "walk_to_board": RewardTermCfg(
++      func=walk_to_board_reward,
++      weight=2.0,
++      params={"board_x": BOARD_FACE_X - 0.25, "asset_cfg": _TORSO_CFG},
++    ),
+     "pen_contact": RewardTermCfg(
+       func=pen_contact_reward,
+       weight=2.0,
+-      params={"whiteboard_x": WRITING_X, "asset_cfg": _PEN_TIP_CFG},
++      params={"sensor_name": "pen_board_contact"},
++    ),
++    "pen_contact_force": RewardTermCfg(
++      func=pen_contact_force_penalty,
++      weight=-0.5,
++      params={
++        "sensor_name": "pen_board_contact",
++        "max_normal_force": 5.0,
++      },
+     ),
+     "smooth_pen_motion": RewardTermCfg(
+       func=smooth_pen_motion_reward,
+@@ -273,6 +298,28 @@ def make_drawing_env_cfg(
+       extent=2.0,
+       entities={"robot": get_g1_whiteboard_robot_cfg(fixed_base=fixed_base)},
+       spec_fn=whiteboard_spec_fn,
++      sensors=(
++        ContactSensorCfg(
++          name="pen_board_contact",
++          primary=ContactMatch(mode="geom", pattern="pen_tip_geom", entity="robot"),
++          secondary=ContactMatch(mode="geom", pattern="whiteboard_surface"),
++          fields=("found", "force"),
++          reduce="netforce",
++        ),
++        ContactSensorCfg(
++          name="feet_ground_contact",
++          primary=ContactMatch(
++            mode="subtree",
++            pattern=r"^(left_ankle_roll_link|right_ankle_roll_link)$",
++            entity="robot",
++          ),
++          secondary=ContactMatch(mode="body", pattern="whiteboard_floor"),
++          fields=("found", "force"),
++          reduce="netforce",
++          num_slots=1,
++          track_air_time=True,
++        ),
++      ),
+     ),
+     observations=observations,
+     actions=actions,
+@@ -293,5 +340,5 @@ def make_drawing_env_cfg(
+       mujoco=MujocoCfg(timestep=0.005, iterations=20, ls_iterations=40),
+     ),
+     decimation=4,
+-    episode_length_s=20.0,
++    episode_length_s=24.0,
+   )
+diff --git a/src/mjlab/tasks/whiteboard/env_cfg.py b/src/mjlab/tasks/whiteboard/env_cfg.py
+deleted file mode 100644
+index d88f31759..000000000
+--- a/src/mjlab/tasks/whiteboard/env_cfg.py
++++ /dev/null
+@@ -1,188 +0,0 @@
+-from __future__ import annotations
+-
+-import mujoco
+-
+-from mjlab.asset_zoo.robots.unitree_g1.g1_constants import (
+-  G1_ARTICULATION,
+-  KNEES_BENT_KEYFRAME,
+-  get_spec,
+-)
+-from mjlab.entity import EntityCfg
+-from mjlab.envs import ManagerBasedRlEnvCfg
+-from mjlab.envs.mdp import (
+-  action_rate_l2,
+-  joint_pos_limits,
+-  joint_pos_rel,
+-  joint_vel_rel,
+-  last_action,
+-)
+-from mjlab.envs.mdp.actions import JointPositionActionCfg
+-from mjlab.envs.mdp.events import reset_joints_by_offset
+-from mjlab.envs.mdp.terminations import time_out
+-from mjlab.managers import ObservationGroupCfg, ObservationTermCfg
+-from mjlab.managers.action_manager import ActionTermCfg
+-from mjlab.managers.event_manager import EventTermCfg
+-from mjlab.managers.reward_manager import RewardTermCfg
+-from mjlab.managers.scene_entity_config import SceneEntityCfg
+-from mjlab.managers.termination_manager import TerminationTermCfg
+-from mjlab.scene import SceneCfg
+-from mjlab.sim import MujocoCfg, SimulationCfg
+-from mjlab.tasks.whiteboard import mdp
+-from mjlab.tasks.whiteboard.mdp.commands import CircleDrawingCommandCfg
+-from mjlab.terrains import TerrainEntityCfg
+-from mjlab.viewer import ViewerConfig
+-
+-_PEN_TIP_SITE = "pen_tip"
+-_PEN_PARENT_BODY = "right_wrist_yaw_link"
+-_RIGHT_ARM_JOINTS = (
+-  "right_shoulder_pitch_joint",
+-  "right_shoulder_roll_joint",
+-  "right_shoulder_yaw_joint",
+-  "right_elbow_joint",
+-  "right_wrist_roll_joint",
+-  "right_wrist_pitch_joint",
+-  "right_wrist_yaw_joint",
+-)
+-
+-
+-def _get_g1_whiteboard_spec() -> mujoco.MjSpec:
+-  spec = get_spec()
+-  parent = next((body for body in spec.bodies if body.name == _PEN_PARENT_BODY), None)
+-  if parent is None:
+-    raise ValueError(f"Cannot attach pen: G1 body '{_PEN_PARENT_BODY}' is missing")
+-  pen = parent.add_body(name="pen", pos=(0.08, 0.0, 0.0))
+-  pen.add_geom(
+-    name="pen_body",
+-    type=mujoco.mjtGeom.mjGEOM_CAPSULE,
+-    fromto=(0.0, 0.0, 0.0, 0.16, 0.0, 0.0),
+-    size=(0.008, 0.0, 0.0),
+-    mass=0.02,
+-    rgba=(0.15, 0.15, 0.18, 1.0),
+-    contype=0,
+-    conaffinity=0,
+-  )
+-  pen.add_site(
+-    name=_PEN_TIP_SITE,
+-    pos=(0.16, 0.0, 0.0),
+-    size=(0.006, 0.0, 0.0),
+-    rgba=(0.9, 0.1, 0.1, 1.0),
+-  )
+-  for joint in spec.joints:
+-    if joint.name == "floating_base_joint":
+-      spec.delete(joint)
+-      break
+-  return spec
+-
+-
+-def _add_whiteboard(spec: mujoco.MjSpec) -> None:
+-  board = spec.worldbody.add_body(name="whiteboard", pos=(0.56, 0.0, 1.1))
+-  board.add_geom(
+-    name="whiteboard_surface",
+-    type=mujoco.mjtGeom.mjGEOM_BOX,
+-    size=(0.01, 0.42, 0.36),
+-    rgba=(0.95, 0.95, 0.95, 1.0),
+-    friction=(0.8, 0.01, 0.001),
+-  )
+-
+-
+-def whiteboard_circle_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+-  pen_cfg = SceneEntityCfg("robot", site_names=(_PEN_TIP_SITE,))
+-  actor_terms = {
+-    "joint_pos": ObservationTermCfg(func=joint_pos_rel, noise=None),
+-    "joint_vel": ObservationTermCfg(func=joint_vel_rel, noise=None),
+-    "circle_target": ObservationTermCfg(
+-      func=mdp.circle_target_in_base,
+-      params={"command_name": "circle", "asset_cfg": pen_cfg},
+-      history_length=2,
+-      delay_min_lag=0,
+-      delay_max_lag=2,
+-    ),
+-    "actions": ObservationTermCfg(func=last_action),
+-  }
+-  observations = {
+-    "actor": ObservationGroupCfg(actor_terms, enable_corruption=not play),
+-    "critic": ObservationGroupCfg({**actor_terms}, enable_corruption=False),
+-  }
+-  actions: dict[str, ActionTermCfg] = {
+-    "joint_pos": JointPositionActionCfg(
+-      entity_name="robot",
+-      actuator_names=_RIGHT_ARM_JOINTS,
+-      scale=0.25,
+-      use_default_offset=True,
+-    )
+-  }
+-  events = {
+-    "reset_robot_joints": EventTermCfg(
+-      func=reset_joints_by_offset,
+-      mode="reset",
+-      params={
+-        "position_range": (0.0, 0.0),
+-        "velocity_range": (0.0, 0.0),
+-        "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
+-      },
+-    )
+-  }
+-  rewards = {
+-    "circle_tracking": RewardTermCfg(
+-      func=mdp.circle_tracking,
+-      weight=2.0,
+-      params={"command_name": "circle", "asset_cfg": pen_cfg, "std": 0.04},
+-    ),
+-    "board_contact": RewardTermCfg(
+-      func=mdp.whiteboard_contact,
+-      weight=0.5,
+-      params={"asset_cfg": pen_cfg, "board_axis": 0, "board_position": 0.55},
+-    ),
+-    "circle_completion": RewardTermCfg(
+-      func=mdp.circle_completion,
+-      weight=1.0,
+-      params={"command_name": "circle"},
+-    ),
+-    "action_rate_l2": RewardTermCfg(func=action_rate_l2, weight=-0.01),
+-    "joint_pos_limits": RewardTermCfg(
+-      func=joint_pos_limits,
+-      weight=-10.0,
+-      params={"asset_cfg": SceneEntityCfg("robot", joint_names=_RIGHT_ARM_JOINTS)},
+-    ),
+-  }
+-  return ManagerBasedRlEnvCfg(
+-    scene=SceneCfg(
+-      terrain=TerrainEntityCfg(terrain_type="plane"),
+-      entities={
+-        "robot": EntityCfg(
+-          init_state=KNEES_BENT_KEYFRAME,
+-          spec_fn=_get_g1_whiteboard_spec,
+-          articulation=G1_ARTICULATION,
+-        ),
+-      },
+-      num_envs=1,
+-      env_spacing=1.0,
+-      spec_fn=_add_whiteboard,
+-    ),
+-    observations=observations,
+-    actions=actions,
+-    commands={
+-      "circle": CircleDrawingCommandCfg(
+-        resampling_time_range=(1000.0, 1000.0),
+-        center=(0.54, 0.0, 1.1),
+-        plane_axes=(1, 2),
+-        normal_axis=0,
+-        surface_offset=0.0,
+-        debug_vis=False,
+-      )
+-    },
+-    events=events,
+-    rewards=rewards,
+-    terminations={"time_out": TerminationTermCfg(func=time_out, time_out=True)},
+-    viewer=ViewerConfig(
+-      origin_type=ViewerConfig.OriginType.ASSET_BODY,
+-      entity_name="robot",
+-      body_name="arm",
+-      distance=1.2,
+-      elevation=-10.0,
+-      azimuth=120.0,
+-    ),
+-    sim=SimulationCfg(mujoco=MujocoCfg(timestep=0.005, iterations=10)),
+-    decimation=4,
+-    episode_length_s=20.0,
+-  )
+diff --git a/src/mjlab/tasks/whiteboard/mdp/__init__.py b/src/mjlab/tasks/whiteboard/mdp/__init__.py
+index cc5d6efd9..33ca52651 100644
+--- a/src/mjlab/tasks/whiteboard/mdp/__init__.py
++++ b/src/mjlab/tasks/whiteboard/mdp/__init__.py
+@@ -56,15 +56,18 @@ try:
+   from .observations import (
+     estimated_pen_position,
+     estimated_pen_velocity,
++    pen_board_contact_force,
+     pen_estimate_innovation,
+     pen_position_uncertainty,
+     site_position,
+   )
+   from .rewards import (
++    pen_contact_force_penalty,
+     pen_contact_reward,
+     pen_tracking_reward,
+     smooth_pen_motion_reward,
+     upright_reward,
++    walk_to_board_reward,
+   )
+   from .state_estimation import (
+     StateEstimationCfg,
+@@ -81,13 +84,16 @@ try:
+     "site_position",
+     "estimated_pen_position",
+     "estimated_pen_velocity",
++    "pen_board_contact_force",
+     "pen_position_uncertainty",
+     "pen_estimate_innovation",
+     # Rewards
+     "pen_tracking_reward",
+     "pen_contact_reward",
++    "pen_contact_force_penalty",
+     "smooth_pen_motion_reward",
+     "upright_reward",
++    "walk_to_board_reward",
+     # State estimation env integration
+     "StateEstimationCfg",
+     "get_state_estimator",
+diff --git a/src/mjlab/tasks/whiteboard/mdp/assets.py b/src/mjlab/tasks/whiteboard/mdp/assets.py
+index 736dc1c2f..ab4b61f2a 100644
+--- a/src/mjlab/tasks/whiteboard/mdp/assets.py
++++ b/src/mjlab/tasks/whiteboard/mdp/assets.py
+@@ -39,6 +39,7 @@ from .board import (
+   BOARD_HALF_DEPTH,
+   BOARD_HALF_HEIGHT,
+   BOARD_HALF_WIDTH,
++  FLOOR_Z,
+ )
+ 
+ __all__ = [
+@@ -59,6 +60,7 @@ __all__ = [
+ # Names referenced elsewhere (rewards, observations, canvas). Import these
+ # rather than retyping the strings.
+ PEN_TIP_SITE = "pen_tip"
++PEN_TIP_GEOM = "pen_tip_geom"
+ PEN_BODY = "pen"
+ PEN_PARENT_BODY = "right_wrist_yaw_link"
+ BOARD_BODY = "whiteboard"
+@@ -74,6 +76,7 @@ CANVAS_PIXELS = 512
+ # the palm, with the writing tip at its far end.
+ PEN_LENGTH = 0.16
+ PEN_RADIUS = 0.008
++PEN_TIP_RADIUS = 0.008
+ PEN_OFFSET = (0.06, 0.0, 0.0)
+ 
+ # The free joint mjlab's G1 uses for its floating base.
+@@ -105,33 +108,43 @@ def add_pen(spec: mujoco.MjSpec) -> mujoco.MjSpec:
+       f"has probably changed; update PEN_PARENT_BODY."
+     )
+ 
+-  # Support XMLs that already include the pen attachment.
+-  if any(body.name == PEN_BODY for body in spec.bodies):
+-    return spec
+-
+-  pen = parent.add_body(name=PEN_BODY, pos=PEN_OFFSET)
+-
+-  # Capsule from the wrist outward along +X.
+-  pen.add_geom(
+-    name="pen_body",
+-    type=mujoco.mjtGeom.mjGEOM_CAPSULE,
+-    fromto=[0.0, 0.0, 0.0, PEN_LENGTH, 0.0, 0.0],
+-    size=[PEN_RADIUS, 0.0, 0.0],
+-    rgba=[0.15, 0.15, 0.18, 1.0],
+-    mass=0.02,
+-    contype=0,
+-    conaffinity=0,
+-  )
++  pen = next((body for body in spec.bodies if body.name == PEN_BODY), None)
++  if pen is None:
++    pen = parent.add_body(name=PEN_BODY, pos=PEN_OFFSET)
++
++  if not any(geom.name == "pen_body" for geom in spec.geoms):
++    # Capsule from the wrist outward along +X.
++    pen.add_geom(
++      name="pen_body",
++      type=mujoco.mjtGeom.mjGEOM_CAPSULE,
++      fromto=[0.0, 0.0, 0.0, PEN_LENGTH, 0.0, 0.0],
++      size=[PEN_RADIUS, 0.0, 0.0],
++      rgba=[0.15, 0.15, 0.18, 1.0],
++      mass=0.02,
++      contype=0,
++      conaffinity=0,
++    )
+ 
+-  # The tip site. contype/conaffinity are irrelevant for sites; the contact
+-  # reward works off the geometric distance to the board plane instead of a
+-  # physical contact, which keeps the reward smooth and differentiable.
+-  pen.add_site(
+-    name=PEN_TIP_SITE,
+-    pos=[PEN_LENGTH, 0.0, 0.0],
+-    size=[0.006, 0.0, 0.0],
+-    rgba=[0.9, 0.2, 0.2, 1.0],
+-  )
++  if not any(site.name == PEN_TIP_SITE for site in spec.sites):
++    pen.add_site(
++      name=PEN_TIP_SITE,
++      pos=[PEN_LENGTH, 0.0, 0.0],
++      size=[0.006, 0.0, 0.0],
++      rgba=[0.9, 0.2, 0.2, 1.0],
++    )
++  if not any(geom.name == PEN_TIP_GEOM for geom in spec.geoms):
++    pen.add_geom(
++      name=PEN_TIP_GEOM,
++      type=mujoco.mjtGeom.mjGEOM_SPHERE,
++      pos=[PEN_LENGTH, 0.0, 0.0],
++      size=[PEN_TIP_RADIUS, 0.0, 0.0],
++      rgba=[0.12, 0.12, 0.14, 1.0],
++      mass=0.001,
++      contype=2,
++      conaffinity=0,
++      condim=3,
++      friction=[0.8, 0.02, 0.001],
++    )
+   return spec
+ 
+ 
+@@ -227,6 +240,18 @@ def whiteboard_spec_fn(spec: mujoco.MjSpec) -> None:
+     size=[BOARD_HALF_DEPTH, BOARD_HALF_WIDTH, BOARD_HALF_HEIGHT],
+     material=BOARD_MATERIAL,
+     rgba=[1.0, 1.0, 1.0, 1.0],
++    # The board collides with the pen tip (category 2) only. This prevents
++    # the oversized visual board from snagging the G1's arms or torso.
++    contype=0,
++    conaffinity=2,
++  )
++  floor = spec.worldbody.add_body(name="whiteboard_floor", pos=[0.0, 0.0, FLOOR_Z])
++  floor.add_geom(
++    name="whiteboard_floor_geom",
++    type=mujoco.mjtGeom.mjGEOM_PLANE,
++    size=[5.0, 5.0, 0.1],
++    rgba=[0.18, 0.18, 0.18, 1.0],
+     contype=1,
+     conaffinity=1,
++    friction=[0.8, 0.02, 0.001],
+   )
+diff --git a/src/mjlab/tasks/whiteboard/mdp/board.py b/src/mjlab/tasks/whiteboard/mdp/board.py
+index b8e335db1..541298562 100644
+--- a/src/mjlab/tasks/whiteboard/mdp/board.py
++++ b/src/mjlab/tasks/whiteboard/mdp/board.py
+@@ -11,13 +11,13 @@ quietly stops being achievable and the policy plateaus for no visible reason.
+ Everything now imports from here. If the board moves in the MJCF, change these
+ constants and nothing else.
+ 
+-MJCF reference (g1_29dof_whiteboard.xml)::
++MJCF reference (programmatic task scene)::
+ 
+-    body pos   = (0.35, 0, 1.10)
++    body pos   = (0.35, 0, 0.60)
+     geom size  = (0.02, 0.40, 0.35)      half-extents in (x, y, z)
+ 
+ so the writable face is at x = 0.35 - 0.02 = 0.33, and the physical surface
+-spans y in [-0.40, +0.40], z in [0.75, 1.45].
++spans y in [-0.40, +0.40], z in [0.25, 0.95].
+ """
+ 
+ from __future__ import annotations
+@@ -26,21 +26,22 @@ from __future__ import annotations
+ 
+ BOARD_CENTRE_X: float = 0.35
+ BOARD_CENTRE_Y: float = 0.0
+-BOARD_CENTRE_Z: float = 1.10
++BOARD_CENTRE_Z: float = 0.60
++FLOOR_Z: float = 0.0
+ 
+ BOARD_HALF_DEPTH: float = 0.02
+ BOARD_HALF_WIDTH: float = 0.40
+ BOARD_HALF_HEIGHT: float = 0.35
+ 
+ #: World/env-local X of the face the robot writes on (the -X face).
+-BOARD_FACE_X: float = BOARD_CENTRE_X - BOARD_HALF_DEPTH  # 0.63
+-WRITING_X: float = BOARD_FACE_X - 0.008
++BOARD_FACE_X: float = BOARD_CENTRE_X - BOARD_HALF_DEPTH  # 0.33
++WRITING_X: float = BOARD_FACE_X - 0.008  # pen-tip center at light contact
+ 
+ #: Full physical extent of the drawable surface.
+ BOARD_Y_MIN: float = BOARD_CENTRE_Y - BOARD_HALF_WIDTH  # -0.40
+ BOARD_Y_MAX: float = BOARD_CENTRE_Y + BOARD_HALF_WIDTH  # +0.40
+-BOARD_Z_MIN: float = BOARD_CENTRE_Z - BOARD_HALF_HEIGHT  #  0.75
+-BOARD_Z_MAX: float = BOARD_CENTRE_Z + BOARD_HALF_HEIGHT  #  1.45
++BOARD_Z_MIN: float = BOARD_CENTRE_Z - BOARD_HALF_HEIGHT  #  0.25
++BOARD_Z_MAX: float = BOARD_CENTRE_Z + BOARD_HALF_HEIGHT  #  0.95
+ 
+ 
+ # --- Target sampling region (a margin inside the physical surface) ---------
+@@ -59,8 +60,8 @@ TARGET_Y_RANGE: tuple[float, float] = (
+   BOARD_Y_MAX - TARGET_MARGIN_Y,  # +0.30
+ )
+ TARGET_Z_RANGE: tuple[float, float] = (
+-  BOARD_Z_MIN + TARGET_MARGIN_Z,  # 0.80
+-  BOARD_Z_MAX - TARGET_MARGIN_Z,  # 1.40
++  BOARD_Z_MIN + TARGET_MARGIN_Z,  # 0.30
++  BOARD_Z_MAX - TARGET_MARGIN_Z,  # 0.90
+ )
+ 
+ 
+diff --git a/src/mjlab/tasks/whiteboard/mdp/commands.py b/src/mjlab/tasks/whiteboard/mdp/commands.py
+deleted file mode 100644
+index fc60e3b4f..000000000
+--- a/src/mjlab/tasks/whiteboard/mdp/commands.py
++++ /dev/null
+@@ -1,83 +0,0 @@
+-from __future__ import annotations
+-
+-import math
+-from dataclasses import dataclass
+-from typing import TYPE_CHECKING
+-
+-import torch
+-
+-from mjlab.managers.command_manager import CommandTerm, CommandTermCfg
+-
+-if TYPE_CHECKING:
+-  from mjlab.envs.manager_based_rl_env import ManagerBasedRlEnv
+-
+-
+-class CircleDrawingCommand(CommandTerm):
+-  """World-frame point that advances around a circular drawing target."""
+-
+-  cfg: CircleDrawingCommandCfg
+-
+-  def __init__(self, cfg: CircleDrawingCommandCfg, env: ManagerBasedRlEnv):
+-    super().__init__(cfg, env)
+-    self.target_pos = torch.zeros(self.num_envs, 3, device=self.device)
+-    self.phase = torch.zeros(self.num_envs, device=self.device)
+-    self.episode_progress = torch.zeros(self.num_envs, device=self.device)
+-    self.completion_pulse = torch.zeros(self.num_envs, device=self.device)
+-    self.metrics["tracking_error"] = torch.zeros(self.num_envs, device=self.device)
+-    self.metrics["circle_progress"] = torch.zeros(self.num_envs, device=self.device)
+-
+-  @property
+-  def command(self) -> torch.Tensor:
+-    return self.target_pos
+-
+-  def _update_metrics(self) -> None:
+-    self.metrics["tracking_error"] = torch.zeros_like(self.phase)
+-    self.metrics["circle_progress"] = self.episode_progress
+-
+-  def _resample_command(self, env_ids: torch.Tensor) -> None:
+-    self.phase[env_ids] = 0.0
+-    self.episode_progress[env_ids] = 0.0
+-    self.completion_pulse[env_ids] = 0.0
+-    self._set_target(env_ids)
+-
+-  def _update_command(self, env_ids: torch.Tensor | None = None) -> None:
+-    if env_ids is not None:
+-      self._set_target(env_ids)
+-      return
+-    self.phase.add_(self.cfg.angular_speed * self._env.step_dt)
+-    completed = self.phase >= 2.0 * math.pi
+-    self.completion_pulse = completed.float()
+-    self.episode_progress.add_(completed.float())
+-    self.phase.remainder_(2.0 * math.pi)
+-    self._set_target(torch.arange(self.num_envs, device=self.device))
+-
+-  def _set_target(self, env_ids: torch.Tensor) -> None:
+-    angle = self.phase[env_ids]
+-    center = torch.tensor(self.cfg.center, device=self.device).expand(len(env_ids), 3)
+-    center = center + self._env.scene.env_origins[env_ids]
+-    target = center.clone()
+-    target[:, self.cfg.plane_axes[0]] += self.cfg.radius * torch.cos(angle)
+-    target[:, self.cfg.plane_axes[1]] += self.cfg.radius * torch.sin(angle)
+-    target[:, self.cfg.normal_axis] += self.cfg.surface_offset
+-    self.target_pos[env_ids] = target
+-
+-
+-@dataclass(kw_only=True)
+-class CircleDrawingCommandCfg(CommandTermCfg):
+-  center: tuple[float, float, float] = (0.32, -0.02, 0.35)
+-  radius: float = 0.12
+-  angular_speed: float = 1.5
+-  surface_offset: float = 0.0
+-  plane_axes: tuple[int, int] = (0, 2)
+-  normal_axis: int = 1
+-
+-  def __post_init__(self) -> None:
+-    if self.radius <= 0.0:
+-      raise ValueError("Circle radius must be positive")
+-    if self.angular_speed <= 0.0:
+-      raise ValueError("Circle angular speed must be positive")
+-    if len(set(self.plane_axes)) != 2 or self.normal_axis in self.plane_axes:
+-      raise ValueError("Circle axes must be two distinct axes excluding normal_axis")
+-
+-  def build(self, env: ManagerBasedRlEnv) -> CircleDrawingCommand:
+-    return CircleDrawingCommand(self, env)
+diff --git a/src/mjlab/tasks/whiteboard/mdp/draw_target_cmd.py b/src/mjlab/tasks/whiteboard/mdp/draw_target_cmd.py
+index 83fbc2056..33a6c741f 100644
+--- a/src/mjlab/tasks/whiteboard/mdp/draw_target_cmd.py
++++ b/src/mjlab/tasks/whiteboard/mdp/draw_target_cmd.py
+@@ -1,24 +1,4 @@
+-"""DrawTargetCommand — issues random 3-D target positions on the whiteboard.
+-
+-The whiteboard in the MJCF lives at world position (0.65, 0, 1.1) with a
+-half-extent of (0.02, 0.4, 0.35) in (x, y, z).  The face the robot writes on
+-is the -X face, so all targets share the constant X value of the board face
+-(0.65 - 0.02 = 0.63).  Y and Z are sampled uniformly within the board bounds.
+-
+-Usage in env cfg::
+-
+-    commands: dict[str, CommandTermCfg] = {
+-        "draw_target": DrawTargetCommandCfg(
+-            resampling_time_range=(3.0, 6.0),
+-            board_face_x=0.63,
+-            board_y_range=(-0.35, 0.35),
+-            board_z_range=(0.80, 1.40),
+-        ),
+-    }
+-
+-The command tensor has shape [B, 3] and is exposed via
+-``env.command_manager.get_command("draw_target")``.
+-"""
++"""Continuous Gerono figure-eight target command for whiteboard drawing."""
+ 
+ from __future__ import annotations
+ 
+@@ -44,13 +24,24 @@ if TYPE_CHECKING:
+   from mjlab.envs import ManagerBasedRlEnv
+ 
+ 
+-class DrawTargetCommand(CommandTerm):
+-  """Samples a random 3-D point on the whiteboard face each episode.
++def gerono_figure_eight(
++  phase: torch.Tensor,
++  center_y: float,
++  center_z: float,
++  radius: float,
++) -> torch.Tensor:
++  """Return the figure-eight Y/Z coordinates for each phase."""
++  return torch.stack(
++    (
++      center_y + radius * torch.sin(phase),
++      center_z + 0.5 * radius * torch.sin(2.0 * phase),
++    ),
++    dim=-1,
++  )
+ 
+-  The command stays fixed for ``resampling_time_range`` seconds, then a new
+-  point is drawn.  This gives the policy time to reach each target before it
+-  moves — important early in training.
+-  """
++
++class DrawTargetCommand(CommandTerm):
++  """Moves a centered pen target through one continuous Gerono figure eight."""
+ 
+   cfg: DrawTargetCommandCfg
+ 
+@@ -67,9 +58,10 @@ class DrawTargetCommand(CommandTerm):
+     # Resolved lazily on first use and cached — see _get_pen_tip_pos.
+     self._pen_site_idx: int | None = None
+ 
+-    # [B, 3]  —  (x=board_face_x, y=uniform, z=uniform)
++    # [B, 3] — fixed writing-plane X and the animated Y/Z target.
+     self._target = torch.zeros(num_envs, 3, device=device)
+     self._phase = torch.zeros(num_envs, device=device)
++    self._elapsed = torch.zeros(num_envs, device=device)
+     self._target[:, 0] = cfg.writing_x
+ 
+     super().__init__(cfg, env)
+@@ -80,7 +72,7 @@ class DrawTargetCommand(CommandTerm):
+     # dimension 0". Initialise it here as a proper per-environment tensor.
+     self.metrics["pen_dist_to_target"] = torch.zeros(self.num_envs, device=self.device)
+ 
+-    # Initialise with a random first sample so episode 0 is not all zeros.
++    # Start at the center target so the arm can reach before drawing begins.
+     self._resample_command(torch.arange(self.num_envs, device=self.device))
+ 
+   # ------------------------------------------------------------------
+@@ -93,20 +85,27 @@ class DrawTargetCommand(CommandTerm):
+     return self._target
+ 
+   def _resample_command(self, env_ids: torch.Tensor) -> None:
++    self._elapsed[env_ids] = 0.0
+     self._phase[env_ids] = 0.0
+-    self._set_circle_target(env_ids)
++    self._set_figure_eight_target(env_ids)
+ 
+   def _update_command(self, env_ids: torch.Tensor | None = None) -> None:
+-    del env_ids
+-    self._phase += self._env.step_dt * self.cfg.angular_speed
+-    self._set_circle_target()
++    ids = slice(None) if env_ids is None else env_ids
++    self._elapsed[ids] += self._env.step_dt
++    self._phase[ids] = (self._elapsed[ids] - self.cfg.approach_duration_s).clamp_min(
++      0.0
++    ) * self.cfg.angular_speed
++    self._set_figure_eight_target(env_ids)
+ 
+-  def _set_circle_target(self, env_ids: torch.Tensor | None = None) -> None:
++  def _set_figure_eight_target(self, env_ids: torch.Tensor | None = None) -> None:
+     ids = slice(None) if env_ids is None else env_ids
+-    phase = self._phase[ids]
+     self._target[ids, 0] = self.cfg.writing_x
+-    self._target[ids, 1] = self.cfg.center_y + self.cfg.radius * torch.cos(phase)
+-    self._target[ids, 2] = self.cfg.center_z + self.cfg.radius * torch.sin(phase)
++    self._target[ids, 1:] = gerono_figure_eight(
++      self._phase[ids],
++      self.cfg.center_y,
++      self.cfg.center_z,
++      self.cfg.radius,
++    )
+ 
+   def _update_metrics(self) -> None:
+     pen_pos = self._get_pen_tip_pos()
+@@ -154,15 +153,7 @@ class DrawTargetCommand(CommandTerm):
+ 
+ @dataclass(kw_only=True)
+ class DrawTargetCommandCfg(CommandTermCfg):
+-  """Configuration for :class:`DrawTargetCommand`.
+-
+-  Attributes:
+-      board_face_x:  World X coordinate of the board face (robot writes here).
+-                     Default matches the MJCF: board centre 0.65 − half-depth 0.02.
+-      board_y_range: (min, max) for Y sampling — horizontal on the board.
+-      board_z_range: (min, max) for Z sampling — vertical on the board.
+-                     Board Z spans 1.1 ± 0.35 = [0.75, 1.45]; we clip inside.
+-  """
++  """Configuration for :class:`DrawTargetCommand`."""
+ 
+   board_face_x: float = BOARD_FACE_X
+   writing_x: float = WRITING_X
+@@ -170,8 +161,9 @@ class DrawTargetCommandCfg(CommandTermCfg):
+   board_z_range: tuple[float, float] = TARGET_Z_RANGE
+   center_y: float = BOARD_CENTRE_Y
+   center_z: float = BOARD_CENTRE_Z
++  approach_duration_s: float = 3.0
+   radius: float = 0.15
+-  angular_speed: float = 0.8
++  angular_speed: float = 0.35
+ 
+   def build(self, env: ManagerBasedRlEnv) -> DrawTargetCommand:
+     return DrawTargetCommand(self, env)
+diff --git a/src/mjlab/tasks/whiteboard/mdp/observations.py b/src/mjlab/tasks/whiteboard/mdp/observations.py
+index 7bb6c7f0c..40bb4d317 100644
+--- a/src/mjlab/tasks/whiteboard/mdp/observations.py
++++ b/src/mjlab/tasks/whiteboard/mdp/observations.py
+@@ -52,6 +52,15 @@ def foot_contact_forces(env: ManagerBasedRlEnv, sensor_name: str) -> torch.Tenso
+   return torch.sign(forces_flat) * torch.log1p(torch.abs(forces_flat))
+ 
+ 
++def pen_board_contact_force(env: ManagerBasedRlEnv, sensor_name: str) -> torch.Tensor:
++  """Signed, log-scaled board-normal force on the pen tip, shape [B, 1]."""
++  sensor: ContactSensor = env.scene[sensor_name]
++  force = sensor.data.force
++  assert force is not None
++  normal_force = force[..., 0].sum(dim=1, keepdim=True)
++  return torch.sign(normal_force) * torch.log1p(torch.abs(normal_force))
++
++
+ def site_position(
+   env: ManagerBasedRlEnv,
+   asset_cfg: SceneEntityCfg,
+diff --git a/src/mjlab/tasks/whiteboard/mdp/rewards.py b/src/mjlab/tasks/whiteboard/mdp/rewards.py
+index 24b5d8f5c..79000c2ac 100644
+--- a/src/mjlab/tasks/whiteboard/mdp/rewards.py
++++ b/src/mjlab/tasks/whiteboard/mdp/rewards.py
+@@ -6,6 +6,7 @@ import torch
+ 
+ from mjlab.entity import Entity
+ from mjlab.managers.scene_entity_config import SceneEntityCfg
++from mjlab.sensor.contact_sensor import ContactSensor
+ 
+ from .cfg_utils import resolve_first_site_id
+ 
+@@ -61,20 +62,43 @@ def pen_tracking_reward(
+   return torch.exp(-2.0 * dist)
+ 
+ 
+-def pen_contact_reward(
++def walk_to_board_reward(
+   env: "ManagerBasedRlEnv",
+-  whiteboard_x: float,
++  board_x: float,
+   asset_cfg: SceneEntityCfg,
+ ) -> torch.Tensor:
+-  """Reward keeping the pen tip pressed against the board surface (X axis).
++  """Reward the floating robot for moving its torso toward the board."""
++  asset: Entity = env.scene[asset_cfg.name]
++  torso_x = asset.data.root_link_pos_w[:, 0] - env.scene.env_origins[:, 0]
++  return torch.exp(-8.0 * torch.abs(torso_x - board_x))
+ 
+-  Args:
+-      whiteboard_x: Env-local X coordinate of the board face, e.g. ``0.63``.
+-      asset_cfg:    SceneEntityCfg with site_names=("pen_tip",).
+-  """
+-  pen_pos = _pen_tip_pos_local(env, asset_cfg)  # [B, 3] env-local
+-  x_error = torch.abs(pen_pos[:, 0] - whiteboard_x)  # [B]
+-  return torch.exp(-15.0 * x_error)
++
++def pen_contact_reward(
++  env: "ManagerBasedRlEnv",
++  sensor_name: str,
++) -> torch.Tensor:
++  """Reward actual pen-tip contact with the board, shape [B]."""
++  sensor: ContactSensor = env.scene[sensor_name]
++  found = sensor.data.found
++  assert found is not None
++  return found.any(dim=1).to(dtype=torch.float32)
++
++
++def pen_contact_force_penalty(
++  env: "ManagerBasedRlEnv",
++  sensor_name: str,
++  max_normal_force: float = 5.0,
++) -> torch.Tensor:
++  """Penalize excessive board-normal force only while the tip is in contact."""
++  sensor: ContactSensor = env.scene[sensor_name]
++  found = sensor.data.found
++  force = sensor.data.force
++  assert found is not None
++  assert force is not None
++  in_contact = found.any(dim=1).to(dtype=force.dtype)
++  normal_force = force[..., 0].sum(dim=1).abs()
++  excess = ((normal_force - max_normal_force) / max_normal_force).clamp(0.0, 1.0)
++  return in_contact * excess.square()
+ 
+ 
+ def smooth_pen_motion_reward(

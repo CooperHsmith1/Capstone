@@ -8,12 +8,22 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added a persistent blue ink trace for the whiteboard task: every pen-on-board contact is recorded per env (``ink_points``/``ink_count`` on the ``draw_target`` command) and shown as blue marks in the viewer. The pen is now a whiteboard marker held against the fingers on the palm side, with a blue end cap.
 - Added physical pen-tip/whiteboard collision sensing and a bounded contact-force
   penalty to the G1 drawing task.
+- Added G-code drawing to the G1 whiteboard task. Set ``MJLAB_DRAWING_GCODE`` to a
+  ``.gcode`` file (``G0``/``G1``/``G2``/``G3``, pen up/down via ``Z``, ``M3``/``M5``
+  or ``M300``) and the pen target follows it, scaled to fit the board. The path only
+  advances while the robot is upright, the pen is on the current waypoint and, for
+  pen-down moves, touching the board.
 
 Changed
 ^^^^^^^
 
+- Whiteboard task: the G1 resets with its elbow out to the side, and arm-posture
+  guards were added (``arms_behind_body`` penalty, ``arm_trapped`` and
+  ``pen_leaning`` terminations, pelvis/waist posture rewards, light-contact pen
+  reward) to stop leaning, trapped-arm and hip-balancing exploits.
 - Changed the G1 whiteboard task to hold a reachable center target before following
   a continuous Gerono figure eight, with matching timing in training and playback.
 - Extended the drawing episode so it includes a complete figure-eight cycle.
@@ -24,6 +34,7 @@ Changed
 Fixed
 ^^^^^
 
+- Fixed the whiteboard pen tip being collision-disabled at runtime (the G1 collision config zeroed unmatched geoms), which left ``pen_contact`` at 0 and let the pen pass through the board. The reset pose now reaches forward with the pen along +X and the board is centred at z=0.80 m.
 - Restored the shared Unitree G1 asset (``g1.xml``) to its pristine, task-agnostic
   form. A prior commit had hardcoded a pen, a whiteboard, and a partial
   ``<actuator>`` block (waist and arms only) directly into the robot XML, which
@@ -42,6 +53,11 @@ Fixed
 - ``FlatPatchSamplingCfg(patch_radius=0)`` no longer collapses every patch to the
   sub-terrain center. The edge-exclusion mask sliced ``arr[-0:]``, which is
   ``arr[0:]``, so it cleared the entire valid mask :issue:`1171`.
+- Fixed the G1 whiteboard task's board geom having ``contype=0``, which made it
+  invisible to collision against the robot's default body collision class and let
+  the torso and arms pass straight through it. The board now uses
+  ``contype=1, conaffinity=1|2`` so it is solid to the robot body while still
+  supporting the pen-tip contact sensor used for drawing detection.
 
 Version 1.6.0 (August 8, 2026)
 ------------------------------
@@ -1076,3 +1092,5 @@ Version 1.0.0 (January 28, 2026)
 --------------------------------
 
 Initial release of mjlab.
+
+

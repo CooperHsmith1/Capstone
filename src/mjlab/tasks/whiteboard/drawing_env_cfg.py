@@ -47,6 +47,7 @@ from .mdp.board import (
   validate as validate_board_geometry,
 )
 from .mdp.draw_target_cmd import DrawTargetCommandCfg
+from .mdp.gcode import load_gcode_path
 from .mdp.observations import (
   estimated_pen_position,
   estimated_pen_velocity,
@@ -55,11 +56,20 @@ from .mdp.observations import (
   site_position,
 )
 from .mdp.rewards import (
+  arm_trapped,
+  arms_behind_body_penalty,
+  base_height_reward,
+  body_touching_board,
+  path_progress_reward,
+  pelvis_upright_reward,
   pen_contact_force_penalty,
   pen_contact_reward,
+  pen_distance_penalty,
+  pen_pressing_too_hard,
   pen_tracking_reward,
   smooth_pen_motion_reward,
   upright_reward,
+  waist_deviation_penalty,
   walk_to_board_reward,
 )
 from .mdp.state_estimation import StateEstimationCfg, reset_state_estimator
@@ -90,6 +100,7 @@ def make_drawing_env_cfg(
   num_envs: int = 4096,
   fixed_base: bool = False,
   state_estimation: StateEstimationCfg | None = None,
+  gcode_path: str | None = None,
 ) -> ManagerBasedRlEnvCfg:
   """Create the whiteboard drawing environment configuration.
 
@@ -106,6 +117,10 @@ def make_drawing_env_cfg(
           derived from a noisy synthetic sensor instead of ground truth.
           ``None`` keeps ground truth, which trains faster but gives the
           policy information no real robot has.
+      gcode_path: Draw this G-code file instead of the figure eight. The path
+          is scaled to fit the board and only advances while the robot is
+          upright, the pen is on the current waypoint and (for pen-down moves)
+          touching the board.
   """
   filtered = state_estimation is not None
   est_params = {"estimator_cfg": state_estimation} if filtered else {}
@@ -195,6 +210,8 @@ def make_drawing_env_cfg(
       writing_x=WRITING_X,
       board_y_range=TARGET_Y_RANGE,
       board_z_range=TARGET_Z_RANGE,
+      gcode_path=gcode_path,
+      debug_vis=True,
     ),
   }
 
@@ -253,6 +270,20 @@ def make_drawing_env_cfg(
       weight=10.0,
       params={"command_name": "draw_target", "asset_cfg": _PEN_TIP_CFG},
     ),
+    "pen_tracking_fine": RewardTermCfg(
+      func=pen_tracking_reward,
+      weight=5.0,
+      params={
+        "command_name": "draw_target",
+        "asset_cfg": _PEN_TIP_CFG,
+        "sharpness": 10.0,
+      },
+    ),
+    "pen_distance": RewardTermCfg(
+      func=pen_distance_penalty,
+      weight=-2.0,
+      params={"command_name": "draw_target", "asset_cfg": _PEN_TIP_CFG},
+    ),
     "walk_to_board": RewardTermCfg(
       func=walk_to_board_reward,
       weight=2.0,
@@ -261,14 +292,14 @@ def make_drawing_env_cfg(
     "pen_contact": RewardTermCfg(
       func=pen_contact_reward,
       weight=2.0,
-      params={"sensor_name": "pen_board_contact"},
+      params={"sensor_name": "pen_board_contact", "max_force": 8.0},
     ),
     "pen_contact_force": RewardTermCfg(
       func=pen_contact_force_penalty,
-      weight=-0.5,
+      weight=-2.0,
       params={
         "sensor_name": "pen_board_contact",
-        "max_normal_force": 5.0,
+        "max_normal_force": 3.0,
       },
     ),
     "smooth_pen_motion": RewardTermCfg(
@@ -276,20 +307,88 @@ def make_drawing_env_cfg(
       weight=-0.01,
       params={"asset_cfg": _RIGHT_ARM_CFG},
     ),
+    "body_board_contact": RewardTermCfg(
+      func=body_touching_board,
+      weight=-2.0,
+      params={"sensor_name": "body_board_contact"},
+    ),
+    "base_height": RewardTermCfg(
+      func=base_height_reward,
+      weight=1.0,
+      params={"target_height": 0.76, "asset_cfg": SceneEntityCfg("robot")},
+    ),
     "upright": RewardTermCfg(
-      func=upright_reward, weight=1.0, params={"asset_cfg": _TORSO_CFG}
+      func=upright_reward,
+      weight=1.5,
+      params={"asset_cfg": _TORSO_CFG, "sharpness": 20.0},
+    ),
+    "pelvis_upright": RewardTermCfg(func=pelvis_upright_reward, weight=1.5),
+    "arms_behind_body": RewardTermCfg(
+      func=arms_behind_body_penalty,
+      weight=-20.0,
+      params={
+        "asset_cfg": SceneEntityCfg(
+          "robot",
+          body_names=(".*_elbow_link", ".*_wrist_yaw_link"),
+        ),
+        "min_forward": -0.02,
+      },
+    ),
+    "waist_deviation": RewardTermCfg(
+      func=waist_deviation_penalty,
+      weight=-2.0,
+      params={"asset_cfg": SceneEntityCfg("robot", joint_names=("waist_.*_joint",))},
     ),
     "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.005),
     "dof_pos_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-0.05),
   }
 
+  if gcode_path is not None:
+    rewards["pen_contact"].params["command_name"] = "draw_target"
+    rewards["path_progress"] = RewardTermCfg(
+      func=path_progress_reward,
+      weight=1.0,
+      params={"command_name": "draw_target"},
+    )
+
   # -- terminations -------------------------------------------------------
   terminations = {
     "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
   }
+  terminations["leaned_on_board"] = TerminationTermCfg(
+    func=body_touching_board, params={"sensor_name": "body_board_contact"}
+  )
+  terminations["arm_trapped"] = TerminationTermCfg(
+    func=arm_trapped,
+    params={
+      "asset_cfg": SceneEntityCfg(
+        "robot", body_names=(".*_elbow_link", ".*_wrist_yaw_link")
+      )
+    },
+  )
+  terminations["pen_leaning"] = TerminationTermCfg(
+    func=pen_pressing_too_hard,
+    params={"sensor_name": "pen_board_contact", "max_force": 80.0},
+  )
   if not fixed_base:
+    # Torso tilt alone lets the robot sit in the splits with an upright torso.
+    terminations["collapsed"] = TerminationTermCfg(
+      func=mdp.root_height_below_minimum,
+      params={"minimum_height": 0.55, "asset_cfg": SceneEntityCfg("robot")},
+    )
     terminations["fell_over"] = TerminationTermCfg(
-      func=mdp.bad_orientation, params={"limit_angle": math.radians(60.0)}
+      func=mdp.bad_orientation, params={"limit_angle": math.radians(25.0)}
+    )
+
+  episode_length_s = 24.0
+  if gcode_path is not None:
+    command_cfg = commands["draw_target"]
+    assert isinstance(command_cfg, DrawTargetCommandCfg)
+    path_length = load_gcode_path(gcode_path, command_cfg.gcode_max_size).length
+    # Approach time plus twice the ideal drawing time, to allow for stalls.
+    episode_length_s = max(
+      24.0,
+      command_cfg.approach_duration_s + 2.0 * path_length / command_cfg.path_speed,
     )
 
   return ManagerBasedRlEnvCfg(
@@ -305,6 +404,18 @@ def make_drawing_env_cfg(
           secondary=ContactMatch(mode="geom", pattern="whiteboard_surface"),
           fields=("found", "force"),
           reduce="netforce",
+        ),
+        ContactSensorCfg(
+          name="body_board_contact",
+          primary=ContactMatch(
+            mode="body",
+            pattern=r"^(?!right_wrist|pen$).*",
+            entity="robot",
+          ),
+          secondary=ContactMatch(mode="geom", pattern="whiteboard_surface"),
+          fields=("found",),
+          reduce="none",
+          num_slots=1,
         ),
         ContactSensorCfg(
           name="feet_ground_contact",
@@ -340,5 +451,6 @@ def make_drawing_env_cfg(
       mujoco=MujocoCfg(timestep=0.005, iterations=20, ls_iterations=40),
     ),
     decimation=4,
-    episode_length_s=24.0,
+    episode_length_s=episode_length_s,
   )
+

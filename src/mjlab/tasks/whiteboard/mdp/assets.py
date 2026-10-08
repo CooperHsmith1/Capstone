@@ -21,6 +21,8 @@ those same constants, so moving the board is a one-line change.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import mujoco
 import numpy as np
 
@@ -72,12 +74,17 @@ BOARD_TEXTURE = "whiteboard_tex"
 # well behaved across drivers.
 CANVAS_PIXELS = 512
 
-# Pen geometry: a short capsule sticking forward (+X in the wrist frame) out of
-# the palm, with the writing tip at its far end.
-PEN_LENGTH = 0.16
-PEN_RADIUS = 0.008
+# Marker geometry, in the wrist frame (+X toward the fingers, -Z the palm side).
+# The barrel rests against the palm side of the fingers, thumb side of the
+# palm, and angles slightly up toward the tip like a held marker. The G1 hand
+# is one rigid mesh with no finger joints, so the grip is a rigid mount rather
+# than a force-closure grasp. The tip stays ~0.22 m ahead of the wrist.
+PEN_OFFSET = (0.03, 0.02, -0.04)
+PEN_VECTOR = (0.19, -0.02, 0.04)
+PEN_LENGTH = float(np.linalg.norm(PEN_VECTOR))
+PEN_RADIUS = 0.0085
 PEN_TIP_RADIUS = 0.008
-PEN_OFFSET = (0.06, 0.0, 0.0)
+PEN_CAP_LENGTH = 0.05
 
 # The free joint mjlab's G1 uses for its floating base.
 FREE_JOINT_NAME = "floating_base_joint"
@@ -117,10 +124,22 @@ def add_pen(spec: mujoco.MjSpec) -> mujoco.MjSpec:
     pen.add_geom(
       name="pen_body",
       type=mujoco.mjtGeom.mjGEOM_CAPSULE,
-      fromto=[0.0, 0.0, 0.0, PEN_LENGTH, 0.0, 0.0],
+      fromto=[0.0, 0.0, 0.0, *PEN_VECTOR],
       size=[PEN_RADIUS, 0.0, 0.0],
-      rgba=[0.15, 0.15, 0.18, 1.0],
+      rgba=[0.92, 0.92, 0.95, 1.0],
       mass=0.02,
+      contype=0,
+      conaffinity=0,
+    )
+    # Blue end cap sticking out behind the hand, like a real whiteboard marker.
+    axis = np.asarray(PEN_VECTOR) / PEN_LENGTH
+    pen.add_geom(
+      name="pen_cap",
+      type=mujoco.mjtGeom.mjGEOM_CAPSULE,
+      fromto=[*(-PEN_CAP_LENGTH * axis), 0.0, 0.0, 0.0],
+      size=[PEN_RADIUS * 1.1, 0.0, 0.0],
+      rgba=[0.1, 0.2, 0.9, 1.0],
+      mass=0.001,
       contype=0,
       conaffinity=0,
     )
@@ -128,7 +147,7 @@ def add_pen(spec: mujoco.MjSpec) -> mujoco.MjSpec:
   if not any(site.name == PEN_TIP_SITE for site in spec.sites):
     pen.add_site(
       name=PEN_TIP_SITE,
-      pos=[PEN_LENGTH, 0.0, 0.0],
+      pos=list(PEN_VECTOR),
       size=[0.006, 0.0, 0.0],
       rgba=[0.9, 0.2, 0.2, 1.0],
     )
@@ -136,7 +155,7 @@ def add_pen(spec: mujoco.MjSpec) -> mujoco.MjSpec:
     pen.add_geom(
       name=PEN_TIP_GEOM,
       type=mujoco.mjtGeom.mjGEOM_SPHERE,
-      pos=[PEN_LENGTH, 0.0, 0.0],
+      pos=list(PEN_VECTOR),
       size=[PEN_TIP_RADIUS, 0.0, 0.0],
       rgba=[0.12, 0.12, 0.14, 1.0],
       mass=0.001,
@@ -178,6 +197,36 @@ def get_g1_whiteboard_spec(fixed_base: bool = True) -> mujoco.MjSpec:
   return spec
 
 
+# FULL_COLLISION zeroes every unmatched geom, which silently disabled the pen tip.
+# Keep it as a type-2 geom that only collides with the board (conaffinity bit 2).
+WHITEBOARD_COLLISION = replace(
+  FULL_COLLISION,
+  geom_names_expr=(*FULL_COLLISION.geom_names_expr, f"^{PEN_TIP_GEOM}$"),
+  contype={f"^{PEN_TIP_GEOM}$": 2, ".*": 1},
+  conaffinity={f"^{PEN_TIP_GEOM}$": 0, ".*": 1},
+  condim={f"^{PEN_TIP_GEOM}$": 3, **FULL_COLLISION.condim},
+  friction={f"^{PEN_TIP_GEOM}$": (0.8, 0.02, 0.001), **FULL_COLLISION.friction},
+)
+
+
+# Reach-ready reset: right elbow held out to the side (~0.2 m) and forward of the
+# pelvis, pen axis along +X, tip ~0.26 m ahead of the pelvis at board height.
+# Solved with IK; keeps the arm clear of the hip and torso.
+WHITEBOARD_INIT_STATE = replace(
+  KNEES_BENT_KEYFRAME,
+  joint_pos={
+    **KNEES_BENT_KEYFRAME.joint_pos,
+    "right_shoulder_pitch_joint": -0.097,
+    "right_shoulder_roll_joint": -0.405,
+    "right_shoulder_yaw_joint": 1.512,
+    "right_elbow_joint": 0.189,
+    "right_wrist_roll_joint": 0.16,
+    "right_wrist_pitch_joint": -0.737,
+    "right_wrist_yaw_joint": -1.453,
+  },
+)
+
+
 def get_g1_whiteboard_robot_cfg(fixed_base: bool = True) -> EntityCfg:
   """G1 entity config for the drawing task.
 
@@ -186,8 +235,8 @@ def get_g1_whiteboard_robot_cfg(fixed_base: bool = True) -> EntityCfg:
   by callers.
   """
   return EntityCfg(
-    init_state=KNEES_BENT_KEYFRAME,
-    collisions=(FULL_COLLISION,),
+    init_state=WHITEBOARD_INIT_STATE,
+    collisions=(WHITEBOARD_COLLISION,),
     spec_fn=lambda: get_g1_whiteboard_spec(fixed_base=fixed_base),
     articulation=G1_ARTICULATION,
   )
@@ -240,10 +289,13 @@ def whiteboard_spec_fn(spec: mujoco.MjSpec) -> None:
     size=[BOARD_HALF_DEPTH, BOARD_HALF_WIDTH, BOARD_HALF_HEIGHT],
     material=BOARD_MATERIAL,
     rgba=[1.0, 1.0, 1.0, 1.0],
-    # The board collides with the pen tip (category 2) only. This prevents
-    # the oversized visual board from snagging the G1's arms or torso.
-    contype=0,
-    conaffinity=2,
+    # Category 1 (default robot collision class, see g1.xml) makes the board
+    # a solid obstacle for the whole robot body -- without it, the torso and
+    # arms pass straight through the board since they never share a
+    # contype/conaffinity bit with a pen-tip-only board. Category 2 keeps the
+    # fine pen-tip contact sensor working for drawing detection.
+    contype=1,
+    conaffinity=1 | 2,
   )
   floor = spec.worldbody.add_body(name="whiteboard_floor", pos=[0.0, 0.0, FLOOR_Z])
   floor.add_geom(

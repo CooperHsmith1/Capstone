@@ -13,7 +13,7 @@ constants and nothing else.
 
 MJCF reference (programmatic task scene)::
 
-    body pos   = (0.35, 0, 0.60)
+    body pos   = (0.35, 0, 0.80)
     geom size  = (0.02, 0.40, 0.35)      half-extents in (x, y, z)
 
 so the writable face is at x = 0.35 - 0.02 = 0.33, and the physical surface
@@ -26,7 +26,7 @@ from __future__ import annotations
 
 BOARD_CENTRE_X: float = 0.35
 BOARD_CENTRE_Y: float = 0.0
-BOARD_CENTRE_Z: float = 0.60
+BOARD_CENTRE_Z: float = 0.80
 FLOOR_Z: float = 0.0
 
 BOARD_HALF_DEPTH: float = 0.02

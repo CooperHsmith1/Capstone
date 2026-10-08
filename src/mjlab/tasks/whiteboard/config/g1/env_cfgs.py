@@ -1,5 +1,7 @@
 """Unitree G1 whiteboard drawing environment configurations."""
 
+import os
+
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.tasks.whiteboard.drawing_env_cfg import make_drawing_env_cfg
 from mjlab.tasks.whiteboard.mdp.state_estimation import StateEstimationCfg
@@ -10,6 +12,7 @@ def unitree_g1_drawing_env_cfg(
   num_envs: int = 4096,
   fixed_base: bool = False,
   state_estimation: StateEstimationCfg | None = None,
+  gcode_path: str | None = None,
 ) -> ManagerBasedRlEnvCfg:
   """Create the Unitree G1 whiteboard drawing environment configuration.
 
@@ -25,6 +28,9 @@ def unitree_g1_drawing_env_cfg(
       behaviour is learned.
     state_estimation: Route the pen observation through a particle filter,
       EKF or UKF instead of ground truth. See Section 4 of the interim report.
+    gcode_path: G-code file to draw instead of the figure eight. Defaults to the
+      ``MJLAB_DRAWING_GCODE`` environment variable, which is how the ``train``
+      and ``play`` scripts pick it up.
 
   Note:
     Reward terms are deliberately NOT rebuilt here. An earlier version of this
@@ -36,10 +42,12 @@ def unitree_g1_drawing_env_cfg(
     individual ``.weight`` fields if needed, but never reassign the whole
     RewardTermCfg.
   """
+  gcode_path = gcode_path or os.environ.get("MJLAB_DRAWING_GCODE") or None
   cfg = make_drawing_env_cfg(
     num_envs=num_envs,
     fixed_base=fixed_base,
     state_estimation=state_estimation,
+    gcode_path=gcode_path,
   )
 
   if play:

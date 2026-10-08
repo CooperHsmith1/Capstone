@@ -1,0 +1,10 @@
+WHITEBOARD TASK CHANGELOG
+- Fixed contaminated g1.xml; board pass-through collision fix; board centre z=0.80.
+- Pen-tip collision geom (WHITEBOARD_COLLISION) so pen_contact registers; pen marker (white barrel, blue cap).
+- Figure-eight and G-code drawing targets (mdp/gcode.py, examples/); persistent blue ink trace.
+- Rewards: light-contact pen reward, pen force penalty, upright/pelvis_upright/waist_deviation, arms_behind_body, path progress.
+- Terminations: fell_over (25 deg), collapsed, leaned_on_board, pen_leaning (80 N), arm_trapped.
+- New reset pose with elbow out to the side (IK solved); 20,000 PPO iterations.
+- Tests: tests/test_whiteboard_task.py, tests/test_whiteboard_gcode.py; watch_latest.ps1 viewer helper.
+Deleted: env_cfg.py, mdp/commands.py (replaced by drawing_env_cfg.py, draw_target_cmd.py).
+Apply: copy folders over the repo, or git apply all_changes.patch.

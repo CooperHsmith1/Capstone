@@ -80,7 +80,7 @@ def unitree_g1_drawing_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     which is appropriate for a reaching task.
 
   Iterations:
-    Fewer max_iterations (15_000) — the task is simpler than full locomotion
+    Fewer max_iterations (20_000) — the task is simpler than full locomotion
     so it converges faster.  Increase to 30_000 when you add path-following.
   """
   return RslRlOnPolicyRunnerCfg(
@@ -124,5 +124,5 @@ def unitree_g1_drawing_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     # Longer rollouts: the arm needs several seconds of context to learn
     # to hold the pen on the board and track a target smoothly.
     num_steps_per_env=48,
-    max_iterations=15_000,
+    max_iterations=20_000,
   )

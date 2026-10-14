@@ -1,0 +1,15 @@
+Figure-of-8 Whiteboard Training Lineage (Iterations 0 to 28,998)
+=================================================================
+
+This directory contains the complete training history from iteration 0 to the newest figure-of-8 policy at iteration 28,998.
+
+Run Sequence:
+1. 2026-10-09_05-13-32 : Iterations 0 - 3,000 (Initial base training)
+2. 2026-10-09_15-34-25 : Iterations 3,000 - 8,000
+3. 2026-10-11_22-00-17 : Iterations 8,000 - 8,700
+4. 2026-10-11_22-26-58 : Iterations 8,700 - 9,000
+5. 2026-10-11_22-38-05 : Iterations 9,000 - 18,999 (Drawing base)
+6. 2026-10-13_22-11-19 : Iterations 19,000 - 28,998 (Dedicated figure-of-8 training, 10,000 iterations)
+
+To view all training curves in TensorBoard:
+    tensorboard --logdir training_data

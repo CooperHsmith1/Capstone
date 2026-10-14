@@ -136,3 +136,65 @@ def test_factory_keeps_the_robot_floating_for_walk_to_board() -> None:
   assert any(joint.name == "floating_base_joint" for joint in robot_spec.joints)
   assert "pen_board_force" in cfg.observations["actor"].terms
   assert cfg.episode_length_s == 24.0
+
+
+def test_pen_tip_registers_contact_with_board_at_runtime() -> None:
+  import torch
+
+  from mjlab.envs import ManagerBasedRlEnv
+
+  env = ManagerBasedRlEnv(make_drawing_env_cfg(num_envs=1), device="cpu")
+  robot = env.scene["robot"]
+  sensor = env.scene["pen_board_contact"]
+  tip = robot.site_names.index("pen_tip")
+  action = torch.zeros(1, env.action_manager.total_action_dim)
+  env.reset()
+  touched = False
+  for _ in range(30):
+    pose = robot.data.root_link_pose_w.clone()
+    pose[:, 0] += 0.004
+    robot.write_root_link_pose_to_sim(pose)
+    env.step(action)
+    touched |= bool(sensor.data.found.any())
+  assert touched, robot.data.site_pos_w[0, tip]
+  env.close()
+
+
+def test_ink_trace_records_marks_only_on_board_contact() -> None:
+  import torch
+
+  from mjlab.envs import ManagerBasedRlEnv
+
+  env = ManagerBasedRlEnv(make_drawing_env_cfg(num_envs=1), device="cpu")
+  cmd = env.command_manager.get_term("draw_target")
+  action = torch.zeros(1, env.action_manager.total_action_dim)
+  env.reset()
+  env.step(action)
+  assert int(cmd.ink_count[0]) == 0
+  robot = env.scene["robot"]
+  spheres = []
+
+  class _Vis:
+    def get_env_indices(self, num_envs):
+      return range(num_envs)
+
+    def add_sphere(self, center, radius, color, label=None):
+      spheres.append(center)
+
+  cmd.cfg.debug_vis = True
+  mark = None
+  for _ in range(12):
+    pose = robot.data.root_link_pose_w.clone()
+    pose[:, 0] += 0.01
+    robot.write_root_link_pose_to_sim(pose)
+    env.step(action)
+    # Leaning into the board ends the episode, which clears the trace.
+    if mark is None and int(cmd.ink_count[0]) > 0:
+      mark = cmd.ink_points[0, 0].tolist()
+      cmd.debug_vis(_Vis())  # type: ignore[arg-type]
+  assert mark is not None
+  assert abs(mark[0]) < 0.5 and 0.2 < mark[1] < 1.0
+  assert spheres and all(hasattr(c, "copy") for c in spheres)
+  env.reset()
+  assert int(cmd.ink_count[0]) == 0
+  env.close()

@@ -1,0 +1,94 @@
+# G1 29dof whiteboard CIRCLE policy (mjlab task g1_drawing), policy.onnx in same folder.
+# Joint order of the policy == Unitree SDK motor order (L leg, R leg, waist, L arm, R arm).
+joint_ids_map: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]
+step_dt: 0.02
+stiffness: [40.179, 99.098, 40.179, 99.098, 28.501, 28.501, 40.179, 99.098, 40.179, 99.098, 28.501, 28.501, 40.179, 28.501, 28.501, 14.251, 14.251, 14.251, 14.251, 14.251, 16.778, 16.778, 14.251, 14.251, 14.251, 14.251, 14.251, 16.778, 16.778]
+damping: [2.558, 6.309, 2.558, 6.309, 1.814, 1.814, 2.558, 6.309, 2.558, 6.309, 1.814, 1.814, 2.558, 1.814, 1.814, 0.907, 0.907, 0.907, 0.907, 0.907, 1.068, 1.068, 0.907, 0.907, 0.907, 0.907, 0.907, 1.068, 1.068]
+default_joint_pos: [-0.312, 0.0, 0.0, 0.669, -0.363, 0.0, -0.312, 0.0, 0.0, 0.669, -0.363, 0.0, 0.0, 0.0, 0.0, 0.2, 0.2, 0.0, 0.6, 0.0, 0.0, 0.0, -0.097, -0.405, 1.512, 0.6, 0.16, -0.737, -1.453]
+commands: {}
+# Read by whiteboard_observations.h. World frame = robot start pose, +X toward the board.
+whiteboard:
+  mode: circle            # clockwise circle, centre (y=0, z=0.80), radius 0.12 m
+  pelvis_pos: [0.083, 0.039, 0.775]   # mean pelvis position seen in training
+  writing_x: 0.322        # pen-tip x when lightly touching the board (board face at 0.33)
+  center_y: 0.0
+  center_z: 0.80
+  radius: 0.12
+  spacing: 0.005
+  n_points: 152
+  approach_s: 3.0
+  path_speed: 0.05
+  advance_tol: 0.04
+  max_tilt_sq: 0.1
+  touch_tol_x: 0.010
+  pos_std: 0.0066
+  board_force: 0.0
+actions:
+  JointPositionAction:
+    clip: null
+    joint_names: [.*]
+    scale: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+    offset: [-0.312, 0.0, 0.0, 0.669, -0.363, 0.0, -0.312, 0.0, 0.0, 0.669, -0.363, 0.0, 0.0, 0.0, 0.0, 0.2, 0.2, 0.0, 0.6, 0.0, 0.0, 0.0, -0.097, -0.405, 1.512, 0.6, 0.16, -0.737, -1.453]
+    joint_ids: null
+# Observation order is the training order: 111 floats, NO history, NO scaling.
+observations:
+  base_lin_vel:        # 3  CUSTOM: base linear velocity (needs a state estimator on hardware)
+    params: {}
+    clip: null
+    scale: [1.0, 1.0, 1.0]
+    history_length: 1
+  base_ang_vel:        # 3  IMU gyro, body frame
+    params: {}
+    clip: null
+    scale: [1.0, 1.0, 1.0]
+    history_length: 1
+  projected_gravity:   # 3
+    params: {}
+    clip: null
+    scale: [1.0, 1.0, 1.0]
+    history_length: 1
+  joint_pos_rel:       # 29  q - default_joint_pos
+    params: {}
+    clip: null
+    scale: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    history_length: 1
+  joint_vel_rel:       # 29  scale 1.0 (not 0.05 as in the velocity example)
+    params: {}
+    clip: null
+    scale: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    history_length: 1
+  last_action:         # 29  raw previous policy output
+    params: {}
+    clip: null
+    scale: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    history_length: 1
+  pen_pos:             # 3  CUSTOM: filtered pen-tip position (board frame, metres)
+    params: {}
+    clip: null
+    scale: [1.0, 1.0, 1.0]
+    history_length: 1
+  target_pos:          # 3  CUSTOM: circle waypoint (examples/circle.gcode, 0.24 m)
+    params: {}
+    clip: null
+    scale: [1.0, 1.0, 1.0]
+    history_length: 1
+  foot_contact:        # 2  CUSTOM: left/right foot on ground (0/1)
+    params: {}
+    clip: null
+    scale: [1.0, 1.0]
+    history_length: 1
+  pen_board_force:     # 1  CUSTOM: pen-board contact force (0 if no sensor)
+    params: {}
+    clip: null
+    scale: [1.0]
+    history_length: 1
+  pen_vel_est:         # 3  CUSTOM: filtered pen velocity
+    params: {}
+    clip: null
+    scale: [1.0, 1.0, 1.0]
+    history_length: 1
+  pen_pos_std:         # 3  CUSTOM: filter pen-position uncertainty (std dev)
+    params: {}
+    clip: null
+    scale: [1.0, 1.0, 1.0]
+    history_length: 1
